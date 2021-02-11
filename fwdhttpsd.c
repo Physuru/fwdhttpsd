@@ -153,7 +153,7 @@ void *handle(void *whatever) {
 				goto o;
 			}
 			write(service_sock, buf, r);
-        }
+		}
 
 		while ((r = read(service_sock, buf, buf_sz - 2)) > 0) {
 			find_idx = 0, matches = 0;
