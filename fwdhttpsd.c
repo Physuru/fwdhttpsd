@@ -145,7 +145,7 @@ void *handle(void *whatever) {
 			fprintf(stderr, "unable to connect to service named `%s`\n", service->name);
 			goto o;
 		}
-		
+
 		write(service_sock, buf, buf_idx);
 		while (SSL_pending(ssl)) {
 			r = SSL_read(ssl, buf, buf_sz - 2);
@@ -281,8 +281,11 @@ int main(int argc, char *argv[], char *env[]) {
 	SSL_load_error_strings();
 	ctx = SSL_CTX_new(SSLv23_server_method());
 	SSL_CTX_set_cipher_list(ctx, "AES256-SHA256");
-	SSL_CTX_use_certificate_file(ctx, cert_path, SSL_FILETYPE_PEM);
-	SSL_CTX_use_PrivateKey_file(ctx, private_key_path, SSL_FILETYPE_PEM);
+	if (SSL_CTX_use_certificate_file(ctx, cert_path, SSL_FILETYPE_PEM) != 1 ||
+		SSL_CTX_use_PrivateKey_file(ctx, private_key_path, SSL_FILETYPE_PEM) != 1) {
+		fputs("invalid certificate or private key\n", stderr);
+		clean_then_exit();
+	}
 	// threads
 	puts("ready!");
 	for (short unsigned int i = 0; i < (thread_count - 1); ++i) {
