@@ -55,7 +55,7 @@ struct http_service *find_service(char *name) {
 	return NULL;
 }
 
-unsigned char setcreds(int uid, int gid, int chkn_uid, int chkn_gid) {
+unsigned char setuidgid(int uid, int gid, int chkn_uid, int chkn_gid) {
 	setgid(gid);
 	setegid(gid);
 	setuid(uid);
@@ -271,7 +271,7 @@ int main(int argc, char *argv[], char *env[]) {
 			}
 		}
 	}
-	if (!setcreds(new_uid, new_gid, 0, 0)) {
+	if (!setuidgid(new_uid, new_gid, 0, 0)) {
 		fputs("unsafe; try `-u` and `-g`\n", stderr);
 		clean_then_exit();
 	}
