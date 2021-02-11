@@ -47,8 +47,7 @@ void sigint_handler(int sig) {
 struct http_service *find_service(char *name) {
 	for (unsigned int i = 0; i < n_http_services; ++i) {
 		if (strncmp(name, http_services[i].name, http_services[i].name_len) == 0 &&
-			name[http_services[i].name_len] == '\r' &&
-			name[http_services[i].name_len + 1] == '\n') {
+			name[http_services[i].name_len] == '\r') {
 			return &http_services[i];
 		}
 	}
