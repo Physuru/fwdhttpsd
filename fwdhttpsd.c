@@ -145,7 +145,7 @@ void *handle(void *whatever) {
 			fprintf(stderr, "unable to connect to service named `%s`\n", service->name);
 			goto o;
 		}
-
+		
 		write(service_sock, buf, buf_idx);
 		while (SSL_pending(ssl)) {
 			r = SSL_read(ssl, buf, buf_sz - 2);
@@ -156,12 +156,13 @@ void *handle(void *whatever) {
 			write(service_sock, buf, r);
 		}
 
+		char *connection_header = "\r\nConnection:close";
 		while ((r = read(service_sock, buf, buf_sz - 2)) > 0) {
 			// overwrite the value of the "Connection" response header with "close"
 			find_idx = 0, matches = 0;
 			while (matches >= 0 && find_idx < r) {
 				if (matches >= 13 && buf[find_idx] != '\r') {
-					buf[find_idx] = matches == 18 ? ' ' : ((char []){ 'c', 'l', 'o', 's', 'e' })[(matches++) - 13];
+					buf[find_idx] = matches == 18 ? ' ' : connection_header[matches++];
 					++find_idx;
 				} else if (matches >= 13) {
 					matches = -1;
@@ -169,7 +170,7 @@ void *handle(void *whatever) {
 				} else if (matches == 2 && buf[find_idx] == '\r') {
 					matches = -1;
 					break;
-				} else if (chrcasecmp(buf[find_idx++], "\r\nConnection:"[matches++]) != 0) {
+				} else if (chrcasecmp(buf[find_idx++], connection_header[matches++]) != 0) {
 					matches = 0;
 				}
 			}
