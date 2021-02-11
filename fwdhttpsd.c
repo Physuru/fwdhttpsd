@@ -1,4 +1,4 @@
-// fwdhttpsd v0.1.1
+// fwdhttpsd v0.1.2
 
 #include <stdio.h>
 #include <unistd.h>
@@ -24,6 +24,9 @@ struct http_service {
 };
 struct http_service *http_services = NULL;
 unsigned int n_http_services = 0;
+
+unsigned int _127_0_0_1 = 0x7f000001;
+short unsigned int _443 = 443;
 
 int chrcasecmp(char c1, char c2) {
 	if (c1 >= 'A' && c1 <= 'Z') c1 += 'a' - 'A';
@@ -137,7 +140,7 @@ void *handle(void *whatever) {
 		int service_sock = socket(AF_INET, SOCK_STREAM, 0);
 		struct sockaddr_in service_addr = { 0 };
 		service_addr.sin_family = AF_INET;
-		service_addr.sin_addr.s_addr = 0b00000001000000000000000001111111; // 127.0.0.1
+		service_addr.sin_addr.s_addr = _127_0_0_1;
 		service_addr.sin_port = service->port;
 
 		if (connect(service_sock, (struct sockaddr *)&service_addr, sizeof(service_addr)) != 0) {
@@ -227,11 +230,12 @@ int parse_args(char *argv[], uid_t *uid, gid_t *gid, char **cert_path, char **pr
 	#undef ARG_COMMON
 }
 int main(int argc, char *argv[], char *env[]) {
+	_127_0_0_1 = htonl(_127_0_0_1);
+	_443 = htons(_443);
 	// set up sigint handler
 	signal(SIGINT, sigint_handler);
 	// maybe owned by root w/ set{uid,gid} bit(s) set
-	setuid(0);
-	setgid(0);
+	setuidgid(0, 0, 0, 0);
 	// root required to obtain port 443
 	if (getuid() != 0) {
 		fputs("must be run as root\n", stderr);
@@ -244,7 +248,7 @@ int main(int argc, char *argv[], char *env[]) {
 	// try to listen on port 443
 	int opt = 1;
 	setsockopt(sv_sock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
-	addr.sin_port = 0b1011101100000001; // 443
+	addr.sin_port = _443;
 	if (bind(sv_sock, (struct sockaddr *)&addr, addr_len) < 0 ||
 		listen(sv_sock, 0) < 0) {
 		clean_then_exit();
