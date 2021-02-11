@@ -104,6 +104,7 @@ void *handle(void *whatever) {
 				goto o;
 			}
 
+			// identify the service via the "Host" request header
 			buf_idx += r;
 			while (find_idx < buf_idx) {
 				if (matches >= 8) {
@@ -156,11 +157,18 @@ void *handle(void *whatever) {
 		}
 
 		while ((r = read(service_sock, buf, buf_sz - 2)) > 0) {
+			// overwrite the value of the "Connection" response header with "close"
 			find_idx = 0, matches = 0;
-			while (find_idx < r) {
+			while (matches >= 0 && find_idx < r) {
 				if (matches >= 13 && buf[find_idx] != '\r') {
 					buf[find_idx] = matches == 18 ? ' ' : ((char []){ 'c', 'l', 'o', 's', 'e' })[(matches++) - 13];
 					++find_idx;
+				} else if (matches >= 13) {
+					matches = -1;
+					break;
+				} else if (matches == 2 && buf[find_idx] == '\r') {
+					matches = -1;
+					break;
 				} else if (chrcasecmp(buf[find_idx++], "\r\nConnection:"[matches++]) != 0) {
 					matches = 0;
 				}
