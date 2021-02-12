@@ -89,6 +89,7 @@ void *handle(void *whatever) {
 		struct http_service *service = NULL;
 		unsigned int name_start_idx = 0, find_idx = 0;
 		unsigned char matches = 0;
+		#define CRLF_MTCH_S (((typeof(matches))(-1)) - 2)
 		do {
 			buf_sz += ADDV;
 			char *tmp = realloc(buf, buf_sz);
@@ -158,29 +159,102 @@ void *handle(void *whatever) {
 			write(service_sock, buf, r);
 		}
 
-		char *connection_header = "\r\nConnection:close";
-		while ((r = read(service_sock, buf, buf_sz - 2)) > 0) {
-			// overwrite the value of the "Connection" response header with "close"
-			find_idx = 0, matches = 0;
-			while (matches >= 0 && find_idx < r) {
-				if (matches >= 13 && buf[find_idx] != '\r') {
-					buf[find_idx] = matches == 18 ? ' ' : connection_header[matches++];
-					++find_idx;
-				} else if (matches >= 13) {
-					matches = -1;
-					break;
-				} else if (matches == 2 && buf[find_idx] == '\r') {
-					matches = -1;
-					break;
-				} else if (chrcasecmp(buf[find_idx++], connection_header[matches++]) != 0) {
-					matches = 0;
-				}
-			}
-			int x = SSL_write(ssl, buf, r);
-			if (x < 0) {
-				fprintf(stderr, "SSL_write (1) returned %i\n", x);
+		if ((r = read(service_sock, buf, 9)) > 0) {
+			if (SSL_write(ssl, buf, r) < 0 || r != 9) {
 				goto o;
 			}
+			if (strncmp(buf, "HTTP/1.1 ", 9) == 0) {
+				goto prtcl_id_1;
+			} else if (strncmp(buf, "HTTP/2 ", 7) == 0) {
+				goto prtcl_id_2;
+			}
+		} else {
+			goto o;
+		}
+
+		rwl: {
+			while ((r = read(service_sock, buf, buf_sz - 2)) > 0) {
+				if (SSL_write(ssl, buf, r) < 0) {
+					fputs("SSL_write returned a value less than 0\n", stderr);
+					goto o;
+				}
+			}
+			goto o;
+		}
+
+		prtcl_id_1: {
+			// i don't wanna keep `realloc`ing `buf`
+			matches = 0;
+			char skip_header = 0;
+			while ((r = read(service_sock, buf, buf_sz - 2)) > 0) {
+				unsigned int pos = 0;
+				for (find_idx = 0; find_idx < r; ++find_idx) {
+					prtcl_id_1_lbs:;
+					if (matches >= CRLF_MTCH_S) {
+						switch (matches) {
+							case (CRLF_MTCH_S + 2): {
+								if (buf[find_idx] == '\n') {
+									SSL_write(ssl, "Connection: close\r\n\r\n", 21);
+									// we probably have a bit of the response body in `buf` already
+									SSL_write(ssl, PTR_PLUS(buf, find_idx + 1), r - find_idx - 1);
+									goto rwl;
+								}
+								matches = 0;
+								break;
+							}
+							case (CRLF_MTCH_S + 1): {
+								if (buf[find_idx] != '\r') {
+									matches = 0;
+									goto prtcl_id_1_lbs;
+								}
+								++matches;
+								break;
+							}
+							case (CRLF_MTCH_S): {
+								if (buf[find_idx] != '\n') {
+									matches = 0;
+									goto prtcl_id_1_lbs;
+								}
+								if (skip_header) {
+									skip_header = 0;
+								} else {
+									SSL_write(ssl, PTR_PLUS(buf, pos), find_idx - pos + 1);
+								}
+								pos = find_idx + 1;
+								++matches;
+								break;
+							}
+						}
+					} else if (matches < CRLF_MTCH_S && buf[find_idx] == '\r') {
+						matches = CRLF_MTCH_S;
+					} else if (matches < 11 && chrcasecmp(buf[find_idx], "Connection:"[matches]) == 0) {
+						matches += 1;
+						if (matches == 11) {
+							skip_header = 1;
+						}
+					}
+				}
+				if (matches > 0 && matches < 11) {
+					char sb[10];
+					int x = read(service_sock, sb, 11 - matches);
+					if (x == 11 - matches) {
+						if (strncmp(sb, &"Connection:"[matches], x) == 0) {
+							skip_header = 1;
+							continue;
+						}
+						SSL_write(ssl, PTR_PLUS(buf, pos), r - pos);
+						SSL_write(ssl, sb, x);
+						continue;
+					}
+				}
+				SSL_write(ssl, PTR_PLUS(buf, pos), r - pos);
+			}
+			goto rwl;
+		}
+
+		prtcl_id_2:; {
+			fputs("http 2 is not implemented yet\n", stderr);
+			goto o;
 		}
 
 		o:;
