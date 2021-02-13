@@ -1,2 +1,2 @@
 #!/bin/bash
-gcc -o fwdhttpsd fwdhttpsd.c -lpthread -lssl -lcrypto
+gcc -o fwdhttpsd *.c -lpthread -lssl -lcrypto
