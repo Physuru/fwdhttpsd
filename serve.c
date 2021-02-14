@@ -31,12 +31,16 @@ void *serve(char *buf) {
 		}
 		SSL_set_fd(ssl, cl_sock);
 
+		int r = 0;
+		char http_keep_alive = 1;
+
 		if (SSL_accept(ssl) == -1) {
 			fputs("SSL_accept (1) returned -1\n", stderr);
 			goto serve__block_near_end;
 		}
 
-		int r = SSL_read(ssl, buf, r_arg(buf_sz));
+		r = SSL_read(ssl, buf, r_arg(buf_sz));
+		printf("%li %s\n", pthread_self(), buf);
 		if (r < 0) {
 			fprintf(stderr, "SSL_read (1) returned %i\n", r);
 			goto serve__block_near_end;
@@ -97,6 +101,7 @@ void *serve(char *buf) {
 
 		write(service_sock, buf, r);
 		while (SSL_pending(ssl)) {
+			serve__block_near_SSL_read_1:;
 			r = SSL_read(ssl, buf, r_arg(buf_sz));
 			if (r < 0) {
 				fprintf(stderr, "SSL_read (2) returned %i\n", r);
@@ -146,27 +151,29 @@ void *serve(char *buf) {
 			char *f2 = memnmem(f, buf + r - f, "\r\n\r\n", 4 /* length of the previous argument */);
 			// check if some response headers didn't fit into `buf`
 			if (f2 == NULL) {
+				printf("%s\n", buf);
 				SSL_write(ssl, "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 41\r\n\r\nResponse HTTP header section is too long.", 110 /* length of the previous argument */);
 				goto serve__block_near_end;
 			}
-			if (f1 != NULL) {
+			if (f1 != NULL) do {
 				// check for duplicate `Connection` headers
 				char *t = memncasemem(f, buf + r - f, "\r\nConnection:", 13 /* length of the previous argument */);
 				if (t != NULL && t < f2) {
 					SSL_write(ssl, "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 36\r\n\r\nResponse HTTP header section is bad.", 105 /* length of the previous argument */);
 					goto serve__block_near_end;
 				}
-				// write response up until the start of the `Connection` header
-				SSL_write(ssl, buf, f1 - buf);
-				while (*f != '\r') ++f;
-			}
-			// here, `f` will either be at the `\r` after the `Connection` header's value, or at the start of the http response
-			SSL_write(ssl, f, f2 - f);
-			// write the "Connection: close" header right before the CRLFCRLF sequence
-			SSL_write(ssl, "\r\nConnection: close\r\n\r\n", 23 /* length of the previous argument */);
-			// write the remaining bytes in `buf`
-			f2 += 4;
-			SSL_write(ssl, f2, buf + r - f2);
+				while (*f == ' ' || *f == '\t') ++f;
+				if (f2 - f < 5 ||
+					strncasecmp(f, "close", 5) != 0) {
+					break;
+				}
+				f += 5;
+				while (*f == ' ' || *f == '\t') ++f;
+				if (*f == '\r') {
+					http_keep_alive = 0;
+				}
+			} while (0);
+			SSL_write(ssl, buf, r);
 			// rwl section will handle the rest
 			goto rwl;
 		}
@@ -177,7 +184,10 @@ void *serve(char *buf) {
 		}
 
 		success:;
-		// placeholder for when i implement `Connection: keep-alive`, etc
+		if (expected_protocol_id == 1 && http_keep_alive) {
+			puts("here\n");
+			goto prtcl_id_1;
+		}
 		serve__block_near_end:;
 		// clean-up
 		if (ssl != NULL) {
