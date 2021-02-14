@@ -30,7 +30,7 @@ unsigned char setuidgid(int uid, int gid, int chkn_uid, int chkn_gid) {
 	r &= setegid(gid);
 	r &= setuid(uid);
 	r &= seteuid(uid);
-    if (chkn_uid < 0) {
+	if (chkn_uid < 0) {
         return r;
     }
 	return getuid() != chkn_uid && getgid() != chkn_gid;
