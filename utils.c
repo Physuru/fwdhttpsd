@@ -8,18 +8,18 @@ int chrcasecmp(char c1, char c2) {
 }
 #define memxmem_prototype(nm, chr_fn) \
 char * nm (char *h, unsigned int h_len, char *s, unsigned int s_len) { \
-    unsigned int x; \
-    for (; h_len >= s_len; ++h, --h_len) { \
-        for (x = 0; x < s_len; ++h, ++x) { \
-            if (chr_fn(*h) != chr_fn(s[x])) { \
-                h_len -= x; \
-                goto s; \
-            } \
-        } \
-        return h - x; \
-        s:; \
-    } \
-    return NULL; \
+	unsigned int x; \
+	for (; h_len >= s_len; ++h, --h_len) { \
+		for (x = 0; x < s_len; ++h, ++x) { \
+			if (chr_fn(*h) != chr_fn(s[x])) { \
+				h_len -= x; \
+				goto s; \
+			} \
+		} \
+		return h - x; \
+		s:; \
+	} \
+	return NULL; \
 }
 memxmem_prototype(memncasemem, tolower);
 memxmem_prototype(memnmem, (char));
@@ -31,8 +31,8 @@ unsigned char setuidgid(int uid, int gid, int chkn_uid, int chkn_gid) {
 	r &= setuid(uid);
 	r &= seteuid(uid);
 	if (chkn_uid < 0) {
-        return r;
-    }
+		return r;
+	}
 	return getuid() != chkn_uid && getgid() != chkn_gid;
 }
 
