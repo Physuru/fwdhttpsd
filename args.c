@@ -12,17 +12,17 @@ struct http_service *r_arg(http_services) = NULL;
 unsigned int r_arg(n_http_services) = 0;
 int parse_args(char *argv[], char *env[]) {
 	#define ARG_COMMON(x, y, z) (strcmp(argv[i], x) == 0) { \
-        if (argv[i + 1] == NULL) { \
-            fprintf(stderr, "argument `%s` is missing values\n", x); \
-            return 0; \
-        } \
-        y = z(argv[i + 1]); \
-        i += 2; \
-    }
+		if (argv[i + 1] == NULL) { \
+			fprintf(stderr, "argument `%s` is missing values\n", x); \
+			return 0; \
+		} \
+		y = z(argv[i + 1]); \
+		i += 2; \
+	}
 	#define CHECK_ARG(x, y, z) if (y == z) { \
-        fprintf(stderr, "missing argument `%s`\n", x); \
-        return 0; \
-    }
+		fprintf(stderr, "missing argument `%s`\n", x); \
+		return 0; \
+	}
 	unsigned int i = 1;
 	while (argv[i]) {
 		if ARG_COMMON("-u", r_arg(uid), stoui32)
@@ -32,11 +32,11 @@ int parse_args(char *argv[], char *env[]) {
 		else if ARG_COMMON("-t", r_arg(thread_count), stoui16)
 		else if ARG_COMMON("-b", r_arg(buf_sz), stoui16)
 		else if (strcmp(argv[i], "-s") == 0) {
-            if (r_arg(n_http_services) == 0xFFFFFFFF) {
-                fputs("cannot add any more http services\n", stderr);
-                i += 3;
-                continue;
-            }
+			if (r_arg(n_http_services) == 0xFFFFFFFF) {
+				fputs("cannot add any more http services\n", stderr);
+				i += 3;
+				continue;
+			}
 			if (argv[i + 1] == NULL || argv[i + 2] == NULL) {
 				fprintf(stderr, "argument `%s` is missing values\n", "-s");
 				return 0;
