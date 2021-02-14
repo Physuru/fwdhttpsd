@@ -13,8 +13,8 @@ int main(int argc, char *argv[], char *env[]) {
 		}
 	}
 	// main thread id
-    main_pthread_id = pthread_self();
-    // network byte order
+	main_pthread_id = pthread_self();
+	// network byte order
 	_127_0_0_1 = htonl(_127_0_0_1);
 	_443 = htons(_443);
 	// set up sigint handler
