@@ -4,6 +4,11 @@
 #include "serve.h"
 #include "utils.h"
 
+void sigint_handler(int unused) {
+	signal(SIGINT, SIG_DFL);
+	_clean_then_exit(0, 0);
+}
+
 int main(int argc, char *argv[], char *env[]) {
 	puts("version 0.2.0");
 	// write warning to `stdout` and `stderr` if `(char)(-1)` is not equal to `0xFF`
@@ -17,8 +22,9 @@ int main(int argc, char *argv[], char *env[]) {
 	// network byte order
 	_127_0_0_1 = htonl(_127_0_0_1);
 	_443 = htons(_443);
-	// set up sigint handler
+	// set up singal handlers
 	signal(SIGINT, sigint_handler);
+	signal(SIGPIPE, SIG_IGN);
 	// program file is maybe owned by root w/ set{uid,gid} bit(s) set
 	uid_t old_uid = getuid();
 	gid_t old_gid = getgid();

@@ -24,7 +24,3 @@ void _clean_then_exit(unsigned char status, unsigned char safe) {
 	close(sv_sock);
 	exit(status);
 }
-void sigint_handler(int unused) {
-	signal(SIGINT, SIG_DFL);
-	_clean_then_exit(0, 0);
-}

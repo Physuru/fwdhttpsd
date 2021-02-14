@@ -11,5 +11,6 @@ struct http_service *find_service(char *name);
 #define stoui32(x) stoui(x, 4)
 #define stoui16(x) stoui(x, 2)
 #define stoui8(x) stoui(x, 1)
+void quick_respond(void /* SSL */ *, unsigned char, char *, char *);
 
 #endif

@@ -1,3 +1,5 @@
+#include <openssl/ssl.h>
+
 #include "args.h"
 #include "general.h"
 
@@ -36,6 +38,24 @@ unsigned char setuidgid(int uid, int gid, int chkn_uid, int chkn_gid) {
 	return getuid() != chkn_uid && getgid() != chkn_gid;
 }
 
+struct uitos {
+	char *str;
+	unsigned char str_len;
+};
+struct uitos uitos(unsigned int i) {
+	char r[11];
+	r[10] = 0;
+	char *p = r + 11;
+	while (i) {
+		*(--p) = (i % 10) + '0';
+		i /= 10;
+	}
+	struct uitos ret = {
+		.str = p,
+		.str_len = r + 11 - p,
+	};
+	return ret;
+}
 long unsigned int stoui(char *str, unsigned char max_size) {
 	if (max_size < 1 || max_size > 8) {
 		fputs("warning: invalid max size (in bytes) passed to `stoui`\n", stderr);
@@ -74,4 +94,37 @@ struct http_service *find_service(char *name) {
 		}
 	}
 	return NULL;
+}
+
+void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *resp_body) {
+	if (protocol_id != 1) {
+		return;
+	}
+	unsigned int status_len = strlen(status);
+	unsigned int resp_body_len = strlen(resp_body);
+	unsigned long long len = 50 + status_len + 10 + resp_body_len;
+	char str[len];
+	char *ptr = str;
+
+	strncpy(ptr, "HTTP/1.1 ", 9);
+	ptr += 9;
+
+	strncpy(ptr, status, status_len);
+	ptr += status_len;
+
+	strncpy(ptr, "\r\nConnection: close\r\nContent-Length: ", 37);
+	ptr += 37;
+
+	struct uitos x = uitos(resp_body_len);
+	strncpy(ptr, x.str, x.str_len);
+	ptr += x.str_len;
+
+	*(ptr++) = '\r';
+	*(ptr++) = '\n';
+	*(ptr++) = '\r';
+	*(ptr++) = '\n';
+
+	strncpy(ptr, resp_body, resp_body_len);
+
+	SSL_write(ssl, str, len);
 }
