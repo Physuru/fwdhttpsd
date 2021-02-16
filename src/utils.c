@@ -1,32 +1,11 @@
 // to-do count: 2
 
+#include <stdarg.h>
+
 #include <openssl/ssl.h>
 
 #include "args.h"
 #include "general.h"
-
-int chrcasecmp(char c1, char c2) {
-	if (c1 >= 'A' && c1 <= 'Z') c1 += 'a' - 'A';
-	if (c2 >= 'A' && c2 <= 'Z') c2 += 'a' - 'A';
-	return c2 - c1;
-}
-#define memxmem_prototype(nm, chr_fn) \
-char * nm (char *h, unsigned int h_len, char *s, unsigned int s_len) { \
-	unsigned int x; \
-	for (; h_len >= s_len; ++h, --h_len) { \
-		for (x = 0; x < s_len; ++h, ++x) { \
-			if (chr_fn(*h) != chr_fn(s[x])) { \
-				h_len -= x; \
-				goto s; \
-			} \
-		} \
-		return h - x; \
-		s:; \
-	} \
-	return NULL; \
-}
-memxmem_prototype(memncasemem, tolower);
-memxmem_prototype(memnmem, (char));
 
 unsigned char setuidgid(int uid, int gid, int chkn_uid, int chkn_gid) {
 	char r = 1;
@@ -89,7 +68,8 @@ long unsigned int stoui(char *str, unsigned char max_size, char end_char) {
 	return r;
 }
 
-// to-do: optimise
+// to-do: this can be improved
+// e.g. some strings may begin with the same bytes
 struct http_service *find_service(char *name) {
 	for (unsigned int i = 0; i < r_arg(n_http_services); ++i) {
 		if (strncmp(name, r_arg(http_services)[i].name, r_arg(http_services)[i].name_len) == 0 &&
@@ -115,6 +95,9 @@ void skip_space_tab(char **str) {
 	}
 }
 void skip_to_cr(char **str) {
+	if (str == NULL || *str == NULL) {
+		return;
+	}
 	while (**str != '\r') {
 		if (**str == 0) {
 			*str = NULL;
@@ -124,6 +107,8 @@ void skip_to_cr(char **str) {
 	}
 }
 
+// to-do: this can be improved
+// e.g. some strings may begin with the same bytes
 void find_headers(char *str, char *str_end, short unsigned int n, ...) {
 	if (!n) {
 		return;
@@ -136,30 +121,35 @@ void find_headers(char *str, char *str_end, short unsigned int n, ...) {
 	};
 	struct entry list[n];
 	struct entry *head = list;
-	struct entry **entry;
+	struct entry **entry = &head;
 	va_list args;
 	va_start(args, n);
 	for (unsigned int i = 0; i < n; ++i) {
-		list[n].str = va_arg(args, char **);
-		list[n].len = strlen(*(list[n].str));
-		list[n].next = list + i + 1;
+		list[i].str = va_arg(args, char **);
+		list[i].len = strlen(*(list[i].str));
+		list[i].next = list + i + 1;
 	}
+	char **crlfcrlf = va_arg(args, char **);
+	*crlfcrlf = NULL;
 	va_end(args);
 	list[n - 1].next = NULL;
 	while (str < str_end) {
-		if (*str == '\r' && *str == '\n') {
+		if (*str == '\r' && *(str + 1) == '\n') {
+			*crlfcrlf = str - 2;
 			break;
 		}
 		entry = &head;
 		while (*entry != NULL) {
-			if ((*entry)->str == NULL || strncasecmp(str, *((*entry)->str), (*entry)->len) != 0) {
-				entry = &((*entry)->next);
-				continue;
+			if (strncasecmp(str, *((*entry)->str), (*entry)->len) == 0 &&
+				str + (*entry)->len < str_end &&
+				*(str + (*entry)->len) == ':') {
+				*((*entry)->str) = str;
+				*entry = (*entry)->next;
+				break;
 			}
-			*((*entry)->str) = str;
-			*entry = (*entry)->next;
-			break;
+			entry = &((*entry)->next);
 		}
+
 		skip_to_cr(&str);
 		if (str == NULL) {
 			return;
@@ -174,7 +164,6 @@ void find_headers(char *str, char *str_end, short unsigned int n, ...) {
 	}
 }
 
-// to-do: consider removing this function
 void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *resp_body) {
 	if (protocol_id != 1) {
 		return;

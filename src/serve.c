@@ -40,53 +40,67 @@ void *serve(char *buf) {
 		}
 		SSL_set_fd(ssl, cl_sock);
 
-		int read_bytes = 0;
-
 		if (SSL_accept(ssl) == -1) {
-			fputs("SSL_accept returned -1\n", stderr);
 			goto serve__block__near_end;
 		}
 
-		read_bytes = SSL_read(ssl, buf, r_arg(buf_sz));
+		int read_bytes = SSL_read(ssl, buf, r_arg(buf_sz));
 		if (read_bytes < 0) {
 			fprintf(stderr, "SSL_read (1) returned %i\n", read_bytes);
 			goto serve__block__near_end;
 		}
 
 		// identify client http version
+		char *exp_f;
 		unsigned char expected_protocol_id = 0; do { /* do...while statement is used so `break` can be used here */
-			char *f = memchr(buf, ' ', read_bytes);
-			if (f++ == NULL) {
+			exp_f = memchr(buf, ' ', read_bytes);
+			if (exp_f++ == NULL) {
 				break;
 			}
-			f = memchr(f, ' ', read_bytes + f - buf);
-			if (f++ == NULL || read_bytes + f - buf < 8) {
+			exp_f = memchr(exp_f, ' ', read_bytes + exp_f - buf);
+			if (exp_f++ == NULL || read_bytes + exp_f - buf < 8) {
 				break;
 			}
-			if (strncmp(f, "HTTP/1.1", 8) == 0 && (f[8] == ' ' || f[8] == '\r')) {
+			// http
+			if (strncmp(exp_f, "HTTP/", 5 /* strlen("HTTP/") */) != 0) {
+				break;
+			}
+			if (strncmp(exp_f + 5 /* strlen("HTTP/") */, "1.1", 3 /* strlen("1.1") */) == 0 && (exp_f[8] == ' ' || exp_f[8] == '\r')) {
 				expected_protocol_id = 1;
-			} else if (strncmp(f, "HTTP/2", 6) == 0 && (f[6] == ' ' || f[6] == '\r')) {
+			} /*else if (f[5] == '2' && (f[6] == ' ' || f[6] == '\r')) {
 				expected_protocol_id = 2;
+			}*/ else {
+				quick_respond(ssl, 1, "501 Not Implemented", "Unsupported protocol.");
+				goto serve__block__near_end;
 			}
 		} while (0);
 
 		// to-do: is it important to parse the request `Content-Length` header?
 		// attempt to parse first `Host` request header
-		char *host = memncasemem(buf, r_arg(buf_sz), "\r\nHost:", 7);
-		if (host == NULL) {
+		char *req_host_header = "Host";
+		char *req_content_length_header = "Content-Length";
+		unsigned int req_content_length = 0, req_read = 0;
+		char *req_crlfcrlf = NULL;
+		{
+			unsigned char prtcl_id_len = exp_f - buf;
+			find_headers(buf + prtcl_id_len, buf + read_bytes, 2, &req_host_header, &req_content_length_header, &req_crlfcrlf);
+		}
+		if (req_crlfcrlf == NULL) {
+			quick_respond(ssl, expected_protocol_id, "400 Bad Request", "Request HTTP header section is too long.");
 			goto serve__block__near_end;
 		}
-		char *srv_name = host + 7;
-		while (*srv_name == ' ') {
-			++srv_name;
-		}
-		if (memnmem(srv_name, buf + r_arg(buf_sz) - srv_name, "\r\n\r\n", 4) == NULL) {
-			fputs("http headers are too long!\n", stderr);
-			if (expected_protocol_id == 1) {
-				quick_respond(ssl, expected_protocol_id, "400 Bad Request", "Request HTTP header section is too long.");
-			}
+		if (req_host_header == NULL) {
+			quick_respond(ssl, expected_protocol_id, "400 Bad Request", "No service specified.");
 			goto serve__block__near_end;
 		}
+		if (req_content_length_header != NULL) {
+			req_content_length_header += 15 /* strlen("Content-Length:") */;
+			skip_space_tab(&req_content_length_header);
+			req_content_length = stoui(req_content_length_header, 4, '\r');
+			req_read = buf + read_bytes - req_crlfcrlf - 4;
+		}
+		char *srv_name = req_host_header + 5 /* strlen("Host:") */;
+		skip_space_tab(&srv_name);
 		// `Host` header value -> `struct http_service`
 		struct http_service *service = find_service(srv_name);
 		if (service == NULL) {
@@ -103,39 +117,51 @@ void *serve(char *buf) {
 
 		if (connect(service_sock, (struct sockaddr *)&service_addr, sizeof(service_addr)) != 0) {
 			fprintf(stderr, "unable to connect to service named `%s`\n", service->name);
+			quick_respond(ssl, expected_protocol_id, "502 Bad Gateway", "Unable to connect to service.");
 			goto serve__block__near_end;
 		}
 
 		write(service_sock, buf, read_bytes);
-		while (SSL_has_pending(ssl)) {
+		while (req_read < req_content_length || SSL_has_pending(ssl)) {
 			read_bytes = SSL_read(ssl, buf, r_arg(buf_sz));
 			if (read_bytes < 0) {
 				fprintf(stderr, "SSL_read (2) returned %i\n", read_bytes);
 				goto serve__block__near_end;
 			}
 			write(service_sock, buf, read_bytes);
+			req_read += read_bytes;
 		}
 		read_bytes = 0;
 
 		// identify server http version
-		char prtcl_id[9] = { 0 }; // the longest string that i care to have in here is "HTTP/1.1 "
-		int prtcl_id_len = read(service_sock, prtcl_id, 9);
+		char prtcl_id[8] = { 0 }; // the longest string that i care to have in here is "HTTP/1.1"
+		int prtcl_id_len = read(service_sock, prtcl_id, 5 /* strlen("HTTP/") */);
 		if (prtcl_id_len <= 0) {
 			goto serve__block__near_end;
 		}
-		if (strncmp(prtcl_id, "HTTP/", 5) == 0) {
-			if (strncmp(prtcl_id + 5, "1.1 ", 4) == 0) {
+		if (strncmp(prtcl_id, "HTTP/", 5 /* strlen("HTTP/") */) == 0) {
+			int x = read(service_sock, prtcl_id + 5 /* strlen("HTTP/") */, 1);
+			prtcl_id_len += x;
+			if (prtcl_id[5] == '2') {
+				quick_respond(ssl, expected_protocol_id, "501 Not Implemented", "Server responded using an unsupported protocl.");
+				goto serve__block__near_end;
+				/*if (expected_protocol_id != 2) {
+					quick_respond(ssl, expected_protocol_id, "502 Bad Gateway", "HTTP version mismatch.");
+					goto serve__block__near_end;
+				}
+				goto serve__prtcl_2;*/
+			}
+			x = read(service_sock, prtcl_id + 6 /* strlen("HTTP/") + 1 */, 2);
+			prtcl_id_len += x;
+			if (strncmp(prtcl_id + 5 /* strlen("HTTP/") */, "1.1", 3 /* strlen("1.1") */) == 0) {
 				if (expected_protocol_id != 1) {
 					quick_respond(ssl, expected_protocol_id, "502 Bad Gateway", "HTTP version mismatch.");
 					goto serve__block__near_end;
 				}
 				goto serve__prtcl_1;
-			} else if (strncmp(prtcl_id + 5, "2 ", 2) == 0) {
-				if (expected_protocol_id != 2) {
-					quick_respond(ssl, expected_protocol_id, "502 Bad Gateway", "HTTP version mismatch.");
-					goto serve__block__near_end;
-				}
-				goto serve__prtcl_2;
+			} else {
+				quick_respond(ssl, expected_protocol_id, "501 Not Implemented", "Server responded using an unsupported protocol.");
+				goto serve__block__near_end;
 			}
 		}
 		SSL_write(ssl, prtcl_id, prtcl_id_len);
@@ -190,16 +216,26 @@ void *serve(char *buf) {
 				char http_keep_alive = 1;
 				unsigned long long int length = 0, total_read_resp_body_bytes = 0;
 
-				// write data to cl_sock
 				read_bytes = read(service_sock, buf, r_arg(buf_sz));
+				char *status_code_start = memchr(buf, ' ', 9);
+				if (status_code_start != NULL) {
+					++status_code_start;
+					if (strncmp(status_code_start, "101", 3) == 0) {
+						quick_respond(ssl, expected_protocol_id, "501 Not Implemented", "Server responded using an unsupported protocol.");
+						goto serve__block__near_end;
+					}
+				}
 
 				char *after_read_data = buf + read_bytes;
 
-				// to-do: stop using memncasemem here
-				char *connection_header = memncasemem(buf, read_bytes, "\r\nConnection:", 13 /* "length" of the previous argument */);
-				char *content_length_header = memncasemem(buf, read_bytes, "\r\nContent-Length:", 17 /* "length" of the previous argument */);
+				char *connection_header = "Connection";
+				char *content_length_header = "Content-Length";
+				char *transfer_encoding_header = "Transfer-Encoding";
+				// to-do: consider implementing the "Keep-Alive" header
+				// char *keep_alive_header = "Keep-Alive";
+				char *crlfcrlf = NULL;
+				find_headers(buf, after_read_data, 3, &connection_header, &content_length_header, &transfer_encoding_header, &crlfcrlf);
 
-				char *crlfcrlf = memnmem(buf, read_bytes, "\r\n\r\n", 4 /* "length" of the previous argument */);
 				// check if some response headers didn't fit into `buf`
 				if (crlfcrlf == NULL) {
 					quick_respond(ssl, expected_protocol_id, "502 Bad Gateway", "Response HTTP header section is too long.");
@@ -208,12 +244,10 @@ void *serve(char *buf) {
 				total_read_resp_body_bytes = after_read_data - 4 /* strlen("\r\n\r\n") */ - crlfcrlf;
 
 				if (content_length_header == NULL || content_length_header >= crlfcrlf) do {
-					char *transfer_encoding_header = memncasemem(buf, read_bytes, "\r\nTransfer-Encoding:", 20 /* "length" of the previous argument */);
-					if (transfer_encoding_header == NULL ||
-						transfer_encoding_header >= crlfcrlf) {
+					if (transfer_encoding_header == NULL) {
 						break;
 					}
-					transfer_encoding_header += 20 /* strlen("\r\nTransfer-Encoding:") */;
+					transfer_encoding_header += 18 /* strlen("Transfer-Encoding:") */;
 					// skip over spaces and tabs
 					skip_space_tab(&transfer_encoding_header);
 					// ensure that the value of the `Transfer-Encoding` header is "chunked"
@@ -231,7 +265,7 @@ void *serve(char *buf) {
 					length = CHUNKED_ENCODING;
 				} while (0); else {
 					// get value of `Content-Length` header as a uint64_t
-					content_length_header += 17 /* strlen("\r\nContent-Length:") */;
+					content_length_header += 15 /* strlen("Content-Length:") */;
 					skip_space_tab(&content_length_header);
 					length = stoui(content_length_header, 8 /* octets */, '\r');
 					// `CHUNKED_ENCODING` is reserved for, well, chunked encoding
@@ -241,14 +275,6 @@ void *serve(char *buf) {
 				}
 				char *after_connection_header = connection_header; // this *will* be pointing to the '\r' after the `Connection` header
 				if (connection_header != NULL) {
-					// modify the line below if you want to, but it's probably not worth it
-					#if 0
-					// check for duplicate `Connection` headers
-					char *t = memncasemem(connection_header, after_read_data - connection_header, "\r\nConnection:", 13 /* "length" of the previous argument */);
-					if (t != NULL && t < crlfcrlf) {
-						goto serve__prtcl_1__bad_headers;
-					}
-					#endif
 					skip_space_tab(&after_connection_header);
 					if (crlfcrlf - after_connection_header >= 5 /* strlen("close") */ &&
 						strncasecmp(after_connection_header, "close", 5 /* "length" of the previous argument */) == 0) {
@@ -265,14 +291,10 @@ void *serve(char *buf) {
 				SSL_write(ssl, prtcl_id, prtcl_id_len);
 				prtcl_id_len = 0;
 				if (r_arg(force_connection_close)) {
-					SSL_write(ssl, buf, connection_header - buf);
+					SSL_write(ssl, buf, connection_header - 2 - buf);
 					SSL_write(ssl, after_connection_header, crlfcrlf - after_connection_header);
 					SSL_write(ssl, "\r\nConnection: close\r\n\r\n", 23 /* "length" of the previous argument */);
 					http_keep_alive = 0;
-				}
-				if (http_keep_alive) {
-					char *keep_alive_header = memncasemem(buf, read_bytes, "\r\nKeep-Alive:", 13 /* "length" of the previous argument */);
-					// to-do: implement
 				}
 				if (length == CHUNKED_ENCODING) {
 					char *chunk = crlfcrlf + 4;
@@ -364,16 +386,16 @@ void *serve(char *buf) {
 						}
 					}
 				} else {
+					// this works for unspecified content-length because all of the response headers will be in `buf`
 					if (r_arg(force_connection_close)) {
-						SSL_write(ssl, buf, after_read_data - crlfcrlf - 4);
+						SSL_write(ssl, crlfcrlf + 4, after_read_data - crlfcrlf - 4);
 					} else {
 						SSL_write(ssl, buf, read_bytes);
 					}
-					int lower = (length - total_read_resp_body_bytes) < r_arg(buf_sz) ? length : (length - total_read_resp_body_bytes);
-					while (total_read_resp_body_bytes < length && (read_bytes = read(service_sock, buf, lower)) > 0) {
+					while (total_read_resp_body_bytes < length) {
+						read_bytes = read(service_sock, buf, r_arg(buf_sz));
 						total_read_resp_body_bytes += read_bytes;
-						if (SSL_write(ssl, buf, read_bytes) < 0) {
-							fputs("SSL_write returned a value less than 0\n", stderr);
+						if (read_bytes < 0 || SSL_write(ssl, buf, read_bytes) < 0) {
 							goto serve__block__near_end;
 						}
 					}
@@ -389,6 +411,8 @@ void *serve(char *buf) {
 			fputs("important warning: http/2 is not properly implemented yet - attempting to use a bad generic read/write loop...\n", stderr);
 			goto serve__block__rwl;
 		}
+
+		// to-do: websockets
 
 		while (!SSL_shutdown(ssl));
 		serve__block__near_end:;

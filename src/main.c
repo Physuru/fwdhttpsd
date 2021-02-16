@@ -10,7 +10,7 @@ void sigint_handler(int unused) {
 }
 
 int main(int argc, char *argv[], char *env[]) {
-	puts("version 0.2.0");
+	puts("version 0.3.0");
 	// write warning to `stdout` and `stderr` if `(char)(-1)` is not equal to `0xFF`
 	if ((unsigned char)(-1) != 0xFF) {
 		for (char fd = STDOUT_FILENO; fd <= STDERR_FILENO; ++fd) {

@@ -34,7 +34,6 @@ int parse_args(char *argv[], char *env[]) {
 		else if ARG_COMMON("-k", r_arg(private_key_path), (char *))
 		else if ARG_COMMON("-t", r_arg(thread_count), stoui16)
 		else if ARG_COMMON("-w", r_arg(timeout), stoui16)
-		else if ARG_COMMON("-f", r_arg(force_connection_close), stoui8)
 		else if ARG_COMMON("-b", r_arg(buf_sz), stoui16)
 		else if (strcmp(argv[i], "-s") == 0) {
 			if (r_arg(n_http_services) == 0xFFFFFFFF) {
@@ -58,6 +57,9 @@ int parse_args(char *argv[], char *env[]) {
 				r_arg(default_http_service).port = htons(stoui16(argv[i + 1]));
 				i += 2;
 			}
+		} else if (strcmp(argv[i], "-f") == 0) {
+			r_arg(force_connection_close) = 1;
+			i += 1;
 		} else {
 			fprintf(stderr, "unknown argument `%s`\n", argv[i]);
 			return 0;
@@ -73,10 +75,6 @@ int parse_args(char *argv[], char *env[]) {
 				r_arg(gid) = stoui32(&env[i][9]);
 			}
 		}
-	}
-	if (r_arg(force_connection_close) > 1) {
-		fputs("warning: invalid value for `-f` (expected 0 or 1)", stderr);
-		r_arg(force_connection_close) = 0;
 	}
 	return 1;
 	#undef CHECK_ARG
