@@ -143,7 +143,7 @@ void *serve(char *buf) {
 			int x = read(service_sock, prtcl_id + 5 /* strlen("HTTP/") */, 1);
 			prtcl_id_len += x;
 			if (prtcl_id[5] == '2') {
-				quick_respond(ssl, expected_protocol_id, "501 Not Implemented", "Server responded using an unsupported protocl.");
+				quick_respond(ssl, expected_protocol_id, "501 Not Implemented", "Server responded using an unsupported protocol.");
 				goto serve__block__near_end;
 				/*if (expected_protocol_id != 2) {
 					quick_respond(ssl, expected_protocol_id, "502 Bad Gateway", "HTTP version mismatch.");
