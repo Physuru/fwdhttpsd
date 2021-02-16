@@ -81,6 +81,7 @@ int main(int argc, char *argv[], char *env[]) {
 	// threads
 	puts("ready!");
 	for (short unsigned int i = 1; i < r_arg(thread_count); ++i) {
+		puts("wowie");
 		pthread_t x = 0; // this variable is mostly unused. `pthread_create` will crash if it's not here, though.
 		pthread_create(&x, NULL, (void *(*)(void *))&serve, calloc(r_arg(buf_sz), 1));
 	}

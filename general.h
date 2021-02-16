@@ -23,4 +23,6 @@ extern SSL_CTX *ssl_ctx;
 extern unsigned int _127_0_0_1;
 extern short unsigned int _443;
 
+#define CHUNKED_ENCODING 0xFFFFFFFFFFFFFFFF
+
 #endif

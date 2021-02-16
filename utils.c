@@ -1,3 +1,5 @@
+// to-do count: 2
+
 #include <openssl/ssl.h>
 
 #include "args.h"
@@ -51,12 +53,12 @@ struct uitos uitos(unsigned int i) {
 		i /= 10;
 	}
 	struct uitos ret = {
-		.str = p,
+		.str = strdup(p),
 		.str_len = r + 11 - p,
 	};
 	return ret;
 }
-long unsigned int stoui(char *str, unsigned char max_size) {
+long unsigned int stoui(char *str, unsigned char max_size, char end_char) {
 	if (max_size < 1 || max_size > 8) {
 		fputs("warning: invalid max size (in bytes) passed to `stoui`\n", stderr);
 		return 0;
@@ -64,15 +66,16 @@ long unsigned int stoui(char *str, unsigned char max_size) {
 	max_size *= 8; // max size in bits on any sane system
 	long long unsigned int r = 0, t;
 	unsigned char x;
-	while (*str) {
+	while (*str == '0') ++str;
+	while (*str != end_char) {
+		x = *(str++) - '0';
+		if (x > 9) {
+			fputs("warning: invalid positive base 10 integer (skipped)\n", stderr);
+			continue;
+		}
 		t = r;
 		t *= 10;
-		x = *(str++) - '0';
 		t += x;
-		if (x > 9) {
-			fputs("warning: invalid positive base 10 integer\n", stderr);
-			return 0;
-		}
 		if (t <= r) {
 			fputs("warning: integer overflow\n", stderr);
 			return 0;
@@ -86,6 +89,7 @@ long unsigned int stoui(char *str, unsigned char max_size) {
 	return r;
 }
 
+// to-do: optimise
 struct http_service *find_service(char *name) {
 	for (unsigned int i = 0; i < r_arg(n_http_services); ++i) {
 		if (strncmp(name, r_arg(http_services)[i].name, r_arg(http_services)[i].name_len) == 0 &&
@@ -93,9 +97,34 @@ struct http_service *find_service(char *name) {
 			return &r_arg(http_services)[i];
 		}
 	}
-	return NULL;
+	struct http_service *r = &r_arg(default_http_service);
+	if (r->name == NULL) {
+		r = NULL;
+	}
+	return r;
 }
 
+void skip_space_tab(char **str) {
+	skip_space_tab_start:;
+	switch (**str) {
+		case ' ':
+		case '\t': {
+			++*str;
+			goto skip_space_tab_start;
+		}
+	}
+}
+void skip_to_cr(char **str) {
+	while (**str != '\r') {
+		if (**str == 0) {
+			*str = NULL;
+			return;
+		}
+		++*str;
+	}
+}
+
+// to-do: consider removing this function
 void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *resp_body) {
 	if (protocol_id != 1) {
 		return;
@@ -117,6 +146,7 @@ void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *resp
 
 	struct uitos x = uitos(resp_body_len);
 	strncpy(ptr, x.str, x.str_len);
+	free(x.str);
 	ptr += x.str_len;
 
 	*(ptr++) = '\r';
