@@ -124,6 +124,56 @@ void skip_to_cr(char **str) {
 	}
 }
 
+void find_headers(char *str, char *str_end, short unsigned int n, ...) {
+	if (!n) {
+		return;
+	}
+	--str_end;
+	struct entry {
+		char **str;
+		size_t len;
+		struct entry *next;
+	};
+	struct entry list[n];
+	struct entry *head = list;
+	struct entry **entry;
+	va_list args;
+	va_start(args, n);
+	for (unsigned int i = 0; i < n; ++i) {
+		list[n].str = va_arg(args, char **);
+		list[n].len = strlen(*(list[n].str));
+		list[n].next = list + i + 1;
+	}
+	va_end(args);
+	list[n - 1].next = NULL;
+	while (str < str_end) {
+		if (*str == '\r' && *str == '\n') {
+			break;
+		}
+		entry = &head;
+		while (*entry != NULL) {
+			if ((*entry)->str == NULL || strncasecmp(str, *((*entry)->str), (*entry)->len) != 0) {
+				entry = &((*entry)->next);
+				continue;
+			}
+			*((*entry)->str) = str;
+			*entry = (*entry)->next;
+			break;
+		}
+		skip_to_cr(&str);
+		if (str == NULL) {
+			return;
+		}
+		str += 2;
+	}
+
+	entry = &head;
+	while (*entry != NULL) {
+		*((*entry)->str) = NULL;
+		entry = &((*entry)->next);
+	}
+}
+
 // to-do: consider removing this function
 void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *resp_body) {
 	if (protocol_id != 1) {
