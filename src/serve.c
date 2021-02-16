@@ -142,19 +142,31 @@ void *serve(char *buf) {
 		// `goto serve__block__rwl;` is implied
 
 		// read response into `buf` and send it to client
-		serve__block__rwl: {
-			read_bytes = r_arg(buf_sz);
-			while (read_bytes == r_arg(buf_sz) && (read_bytes = read(service_sock, buf, r_arg(buf_sz))) > 0) {
-				if (SSL_write(ssl, buf, read_bytes) < 0) {
-					fputs("SSL_write returned a value less than 0\n", stderr);
-					goto serve__block__near_end;
+		serve__block__rwl: for (;;) {
+			struct pollfd pollfds[] = {
+				{ .fd = cl_sock, .events = POLLIN | POLLRDHUP, .revents = 0 },
+				{ .fd = service_sock, .events = POLLIN | POLLRDHUP, .revents = 0 }
+			};
+			int poll_ret = poll(pollfds, 2, r_arg(timeout));
+			if (poll_ret <= 0 || ((pollfds[0].revents | pollfds[1].revents) & POLLRDHUP)) {
+				goto serve__block__near_end;
+			}
+			if ((pollfds[0].revents & POLLIN)) {
+				// write data to service_sock
+				while (SSL_has_pending(ssl) && (read_bytes = SSL_read(ssl, buf, r_arg(buf_sz))) > 0) {
+					if (write(service_sock, buf, read_bytes) < 1) {
+						break;
+					}
 				}
 			}
-			goto serve__block__near_end;
+			while ((pollfds[1].revents & POLLIN) && (read_bytes = read(service_sock, buf, r_arg(buf_sz))) > 0) {
+				if (SSL_write(ssl, buf, read_bytes) < 1) {
+					break;
+				}
+			}
 		}
 
 		serve__prtcl_1: for (;;) {
-			char http_keep_alive = 1;
 			struct pollfd pollfds[] = {
 				{ .fd = cl_sock, .events = POLLIN | POLLRDHUP, .revents = 0 },
 				{ .fd = service_sock, .events = POLLIN | POLLRDHUP, .revents = 0 }
@@ -175,6 +187,7 @@ void *serve(char *buf) {
 				} while (SSL_has_pending(ssl));
 			}
 			if (pollfds[1].revents & POLLIN) {
+				char http_keep_alive = 1;
 				unsigned long long int length = 0, total_read_resp_body_bytes = 0;
 
 				// write data to cl_sock
