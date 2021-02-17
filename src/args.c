@@ -3,16 +3,21 @@
 #include "general.h"
 #include "utils.h"
 
-short unsigned int r_arg(timeout) = 1500;
+#define TIMEOUT_DEFAULT 1500
+#define THREAD_COUNT_DEFAULT 4
+#define BUF_SZ_DEFAULT 0x1000
+
+short unsigned int r_arg(timeout) = TIMEOUT_DEFAULT;
 unsigned char r_arg(force_connection_close) = 0;
 int r_arg(uid);
 int r_arg(gid);
 char *r_arg(cert_path);
 char *r_arg(private_key_path);
-short unsigned int r_arg(thread_count) = 4, r_arg(buf_sz) = 0x1000;
+short unsigned int r_arg(thread_count) = THREAD_COUNT_DEFAULT, r_arg(buf_sz) = BUF_SZ_DEFAULT;
 struct http_service *r_arg(http_services) = NULL;
 struct http_service r_arg(default_http_service) = (struct http_service){ .name = NULL, 0 };
 unsigned int r_arg(n_http_services) = 0;
+// i'm not worried about the performance of this function because it's never called after `serve` is
 int parse_args(char *argv[], char *env[]) {
 	#define ARG_COMMON(x, y, z) (strcmp(argv[i], x) == 0) { \
 		if (argv[i + 1] == NULL) { \
@@ -21,10 +26,6 @@ int parse_args(char *argv[], char *env[]) {
 		} \
 		y = z(argv[i + 1]); \
 		i += 2; \
-	}
-	#define CHECK_ARG(x, y, z) if (y == z) { \
-		fprintf(stderr, "missing argument `%s`\n", x); \
-		return 0; \
 	}
 	unsigned int i = 1;
 	while (argv[i]) {
@@ -60,13 +61,22 @@ int parse_args(char *argv[], char *env[]) {
 		} else if (strcmp(argv[i], "-f") == 0) {
 			r_arg(force_connection_close) = 1;
 			i += 1;
+		} else if (strcmp(argv[i], "-h") == 0) {
+			printf("-c : path to certificate file\n-k : path to private key\n-s : optionally a service name (http request host header value), and a tcp port number (e.g. -s localhost 1234)\n-u : uid to run server with\n-g : gid to run server with\n-t : the amount of threads to be serving (default is %u)\n-w : timeout in ms (default is %u)\n-b : main buffer size (default is %u)\n-f : force `Connection: close` header in http v1.1 responses\n-h : display this text\n", THREAD_COUNT_DEFAULT, TIMEOUT_DEFAULT, BUF_SZ_DEFAULT);
+			return 0;
 		} else {
 			fprintf(stderr, "unknown argument `%s`\n", argv[i]);
 			return 0;
 		}
 	}
-	CHECK_ARG("-c", r_arg(cert_path), NULL);
-	CHECK_ARG("-k", r_arg(private_key_path), NULL);
+	if (r_arg(cert_path) == NULL) {
+		fputs("required argument `-c` is missing a value\n", stderr);
+		return 0;
+	}
+	if (r_arg(private_key_path) == NULL) {
+		fputs("required argument `-k` is missing a value\n", stderr);
+		return 0;
+	}
 	if (r_arg(uid) == 0 || r_arg(uid) == 0) {
 		for (unsigned int i = 0; env[i]; ++i) {
 			if (strncmp(env[i], "SUDO_UID=", 9) == 0) {
