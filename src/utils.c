@@ -75,7 +75,7 @@ struct http_service *find_service(char *name) {
 	for (unsigned int i = 0; i < r_arg(n_http_services); ++i) {
 		if (strncmp(name, r_arg(http_services)[i].name, r_arg(http_services)[i].name_len) == 0 &&
 			name[r_arg(http_services)[i].name_len] == '\r') {
-			return &r_arg(http_services)[i];
+			return r_arg(http_services) + i;
 		}
 	}
 	struct http_service *r = &r_arg(default_http_service);
@@ -165,13 +165,17 @@ void find_headers(char *str, char *str_end, short unsigned int n, ...) {
 	}
 }
 
-void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *resp_body) {
+void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *res_body) {
 	if (protocol_id != 1) {
 		return;
 	}
 	unsigned int status_len = strlen(status);
-	unsigned int resp_body_len = strlen(resp_body);
-	unsigned long long len = 50 + status_len + 10 + resp_body_len;
+	unsigned int res_body_len = strlen(res_body);
+	if (status_len < 0 || res_body_len < 0) {
+		return;
+	}
+	unsigned long long len = 9 + status_len + 51 /* 37 + 4 + 10 */ + res_body_len + 1 /* probably unnecessary safety byte */;
+	//                                                       ^ the max value of 31 (and 32) bits can be represented in base 10 using 10 digits
 	char str[len];
 	char *ptr = str;
 
@@ -184,7 +188,7 @@ void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *resp
 	strncpy(ptr, "\r\nConnection: close\r\nContent-Length: ", 37);
 	ptr += 37;
 
-	struct uitos x = uitos(resp_body_len);
+	struct uitos x = uitos(res_body_len);
 	strncpy(ptr, x.str, x.str_len);
 	free(x.str);
 	ptr += x.str_len;
@@ -194,7 +198,7 @@ void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *resp
 	*(ptr++) = '\r';
 	*(ptr++) = '\n';
 
-	strncpy(ptr, resp_body, resp_body_len);
+	strncpy(ptr, res_body, res_body_len);
 
 	SSL_write(ssl, str, len);
 }

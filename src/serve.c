@@ -58,7 +58,7 @@ void *serve(char *buf) {
 	// read the status line, and hopefully all of the headers
 	int read_bytes = SSL_read(ssl, buf, r_arg(buf_sz));
 	if (read_bytes < 16) {
-		fprintf(stderr, "SSL_read (1) returned %i\n", read_bytes);
+		//fprintf(stderr, "SSL_read (1) returned %i\n", read_bytes);
 		goto serve__main__near_end;
 	}
 
