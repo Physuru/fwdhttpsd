@@ -3,7 +3,7 @@
 #include "general.h"
 #include "utils.h"
 
-short unsigned int r_arg(timeout) = 4000;
+short unsigned int r_arg(timeout) = 1500;
 unsigned char r_arg(force_connection_close) = 0;
 int r_arg(uid);
 int r_arg(gid);

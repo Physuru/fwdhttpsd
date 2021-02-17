@@ -2,7 +2,7 @@
 
 pthread_t main_pthread_id = 0;
 
-int sv_sock = 0;
+int sv_socket = 0;
 struct sockaddr_in sv_addr = { 0 };
 SSL_CTX *ssl_ctx = NULL;
 

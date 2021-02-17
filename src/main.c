@@ -35,15 +35,15 @@ int main(int argc, char *argv[], char *env[]) {
 		clean_then_exit();
 	}
 	// set up socket
-	sv_sock = socket(AF_INET, SOCK_STREAM, 0);
+	sv_socket = socket(AF_INET, SOCK_STREAM, 0);
 	sv_addr.sin_family = AF_INET;
 	sv_addr.sin_addr.s_addr = INADDR_ANY;
 	// try to listen on port 443
 	int opt = 1;
-	setsockopt(sv_sock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
+	setsockopt(sv_socket, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
 	sv_addr.sin_port = _443;
-	if (bind(sv_sock, (struct sockaddr *)&sv_addr, sizeof(sv_addr)) < 0 ||
-		listen(sv_sock, 0) < 0) {
+	if (bind(sv_socket, (struct sockaddr *)&sv_addr, sizeof(sv_addr)) < 0 ||
+		listen(sv_socket, 0) < 0) {
 		clean_then_exit();
 	}
 	// args

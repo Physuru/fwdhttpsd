@@ -7,7 +7,7 @@ void _clean_then_exit(unsigned char status, unsigned char safe) {
 		if (!exiting) {
 			puts("\ncleaning up - please wait...\nsend sigint again to skip clean-up.");
 			exiting = 1;
-			shutdown(sv_sock, SHUT_RD);
+			shutdown(sv_socket, SHUT_RD);
 		}
 		if (r_arg(thread_count)) {
 			return;
@@ -21,6 +21,6 @@ void _clean_then_exit(unsigned char status, unsigned char safe) {
 		free(r_arg(http_services));
 		r_arg(http_services) = NULL;
 	}
-	close(sv_sock);
+	close(sv_socket);
 	exit(status);
 }

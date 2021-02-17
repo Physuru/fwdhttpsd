@@ -6,6 +6,7 @@
 
 #include "args.h"
 #include "general.h"
+#include "utils.h"
 
 unsigned char setuidgid(int uid, int gid, int chkn_uid, int chkn_gid) {
 	char r = 1;
@@ -196,4 +197,45 @@ void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *resp
 	strncpy(ptr, resp_body, resp_body_len);
 
 	SSL_write(ssl, str, len);
+}
+void quick_respond_err(SSL *ssl, unsigned char protocol_id, unsigned char err_id) {
+	switch (err_id) {
+		case (CLIENT_PRTCL_NOT_IMPLEMENTED): {
+			quick_respond(ssl, protocol_id, "501 Not Implemented", "Unsupported protocol.");
+			return;
+		}
+		case (REQ_HEADERS_TOO_LONG): {
+			quick_respond(ssl, protocol_id, "400 Bad Request", "Request HTTP header section is too long.");
+			return;
+		}
+		case (NO_HOST_HEADER): {
+			quick_respond(ssl, protocol_id, "400 Bad Request", "No service specified.");
+			return;
+		}
+		case (INVALID_SERVICE): {
+			quick_respond(ssl, protocol_id, "400 Bad Request", "Invalid service.");
+			return;
+		}
+		case (SERVICE_DOWN): {
+			quick_respond(ssl, protocol_id, "502 Bad Gateway", "Unable to connect to service.");
+			return;
+		}
+		case (SERVER_PRTCL_NOT_IMPLEMENTED): {
+			quick_respond(ssl, protocol_id, "501 Not Implemented", "The service responded using an unsupported protocol.");
+			return;
+		}
+		case (HTTP_VERSION_MISMATCH): {
+			quick_respond(ssl, protocol_id, "502 Bad Gateway", "HTTP version mismatch.");
+			return;
+		}
+		case (RES_HEADERS_TOO_LONG): {
+			quick_respond(ssl, protocol_id, "502 Bad Gateway", "Response HTTP header section is too long.");
+			return;
+		}
+		case (RES_HEADERS_IMPROPER): {
+			quick_respond(ssl, protocol_id, "502 Bad Gateway", "Response HTTP header section is too long.");
+			return;
+		}
+	}
+	quick_respond(ssl, protocol_id, "500 Internal Server Error", "Unknown error.");
 }
