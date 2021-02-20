@@ -5,18 +5,17 @@
 
 unsigned char setuidgid(int uid, int gid, int chkn_uid, int chkn_gid);
 long unsigned int stoui(char *str, unsigned char max_size, char end_char);
-struct http_service *find_service(char *name);
+extern struct http_service *(*find_service)(char *name);
 #define stoui64(x) stoui(x, 8, 0)
 #define stoui32(x) stoui(x, 4, 0)
 #define stoui16(x) stoui(x, 2, 0)
 #define stoui8(x) stoui(x, 1, 0)
-void quick_respond(SSL *, unsigned char, char *, char *);
-void quick_respond_err(SSL *, unsigned char, unsigned char);
-void skip_space_tab(char **);
-void skip_to_cr(char **);
-void find_headers(char *str, char *str_end, short unsigned int n, ...);
+void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *res_body);
+void skip_space_tab(char **str, char *after_str);
+void skip_to_cr(char **str, char *after_str);
+void find_headers(char *, char *, unsigned int, ...);
 
-#define NOTIFY_ERR(err_id) quick_respond_err(ssl, expected_protocol_id, err_id)
+void quick_respond_err(SSL *ssl, unsigned char protocol_id, unsigned char err_id);
 #define CLIENT_PRTCL_NOT_IMPLEMENTED 0
 #define REQ_HEADERS_TOO_LONG 1
 #define NO_HOST_HEADER 2

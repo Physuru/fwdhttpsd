@@ -11,6 +11,7 @@ struct http_service {
 #ifndef https_args_c
 extern short unsigned int r_arg(timeout);
 extern unsigned char r_arg(force_connection_close);
+extern unsigned char r_arg(use_stack_buf);
 extern int r_arg(uid);
 extern int r_arg(gid);
 extern char *r_arg(cert_path);

@@ -11,19 +11,27 @@
 #include "general.h"
 #include "utils.h"
 
-void *serve(char *buf) {
-	if (buf == NULL) {
-		fputs("warning: thread cancelled due to low memory\n", stderr);
-		--r_arg(thread_count);
-		goto serve__general__err;
+void *serve(void *unused) {
+	char *h_buf = NULL, *buf = NULL;
+	if (r_arg(use_stack_buf)) {
+		buf = alloca(r_arg(buf_sz));	
+	} else {
+		h_buf = malloc(r_arg(buf_sz));
+		if (h_buf == NULL) {
+			fputs("warning: thread cancelled due to low memory\n", stderr);
+			goto serve__general__err;
+		}
+		buf = h_buf;
 	}
 
 	serve__main__start:
 
 	// effectively stop this thread if `exiting` is non-zero
 	if (exiting) {
-		free(buf);
-		buf = NULL;
+		if (h_buf != NULL) {
+			free(h_buf);
+			h_buf = NULL;
+		}
 		--r_arg(thread_count);
 		_clean_then_exit(0, 0);
 		goto serve__general__near_end;
@@ -32,8 +40,11 @@ void *serve(char *buf) {
 	// tls
 	SSL *ssl = SSL_new(ssl_ctx);
 	if (ssl == NULL) {
-		goto serve__main__near_end;
+		fputs("warning: thread cancelled due to low memory\n", stderr);
+		goto serve__general__err;
 	}
+
+	#define NOTIFY_ERR(err_id) quick_respond_err(ssl, expected_protocol_id, err_id)
 
 	// accept
 	int cl_socket = accept(sv_socket, NULL, NULL);
@@ -100,11 +111,12 @@ void *serve(char *buf) {
 	// to-do: is it important to parse the request `Content-Length` header?
 
 	// find headers
-	char *req_host_header = "Host";
-	char *req_content_length_header = "Content-Length";
+	char *req_host_header = NULL;
+	char *req_content_length_header = NULL;
 	unsigned int req_content_length = 0, req_read = 0;
 	char *req_crlfcrlf = NULL;
-	find_headers(exp_f, buf + read_bytes, 2, &req_host_header, &req_content_length_header, &req_crlfcrlf);
+	char *req_after_read_data = buf + read_bytes;
+	find_headers(exp_f, req_after_read_data, 2, "Host", &req_host_header, "Content-Length", &req_content_length_header, &req_crlfcrlf);
 
 	if (req_crlfcrlf == NULL) {
 		NOTIFY_ERR(REQ_HEADERS_TOO_LONG);
@@ -117,13 +129,13 @@ void *serve(char *buf) {
 	// attempt to parse first `Content-Length` request header
 	if (req_content_length_header != NULL) {
 		req_content_length_header += 15 /* strlen("Content-Length:") */;
-		skip_space_tab(&req_content_length_header);
+		skip_space_tab(&req_content_length_header, req_after_read_data);
 		req_content_length = stoui(req_content_length_header, 4, '\r');
 		req_read = buf + read_bytes - req_crlfcrlf - 4;
 	}
 	// attempt to parse first `Host` request header
 	char *srv_name = req_host_header + 5 /* strlen("Host:") */;
-	skip_space_tab(&srv_name);
+	skip_space_tab(&srv_name, req_after_read_data);
 	// `Host` header value -> `struct http_service`
 	struct http_service *service = find_service(srv_name);
 	if (service == NULL) {
@@ -195,6 +207,10 @@ void *serve(char *buf) {
 	goto serve__main__near_end;
 
 	serve__prtcl_1: for (;;) {
+		/*
+			to-do: potentially "refill" `buf` if `res_crlfcrlf` isn't found.
+		           (maybe do the same for request headers, too!)
+		*/
 		// check if there's any data to read
 		struct pollfd pollfds[] = {
 			{ .fd = cl_socket, .events = POLLIN | POLLRDHUP, .revents = 0, },
@@ -223,7 +239,7 @@ void *serve(char *buf) {
 				goto serve__main__near_end;
 			}
 			// pointer to the first byte after the read data (`buf + read_bytes`)
-			char *after_read_data = buf + read_bytes;
+			char *res_after_read_data = buf + read_bytes;
 
 			// error on "Switching Protocols" responses
 			char *status_code_start = memchr(buf, ' ', 9);
@@ -236,13 +252,13 @@ void *serve(char *buf) {
 			}
 
 			// parse response headers
-			char *res_connection_header = "Connection";
-			char *res_content_length_header = "Content-Length";
-			char *res_transfer_encoding_header = "Transfer-Encoding";
+			char *res_connection_header = NULL;
+			char *res_content_length_header = NULL;
+			char *res_transfer_encoding_header = NULL;
 			// to-do: consider implementing the "Keep-Alive" header
-			// char *keep_alive_header = "Keep-Alive";
+			// char *keep_alive_header = NULL;
 			char *res_crlfcrlf = NULL;
-			find_headers(buf, after_read_data, 3, &res_connection_header, &res_content_length_header, &res_transfer_encoding_header, &res_crlfcrlf);
+			find_headers(buf, res_after_read_data, 3, "Connection", &res_connection_header, "Content-Length", &res_content_length_header, "Transfer-Encoding", &res_transfer_encoding_header, &res_crlfcrlf);
 
 			// check if some response headers didn't fit into `buf`
 			if (res_crlfcrlf == NULL) {
@@ -255,42 +271,41 @@ void *serve(char *buf) {
 				// get value of `Content-Length` header as a uint64_t
 				res_content_length_header += 15 /* strlen("Content-Length:") */;
 				// `total_read_res_body_bytes` will be compared to `res_body_length`
-				total_read_res_body_bytes = after_read_data - res_crlfcrlf - 4 /* strlen("\r\n\r\n") */;
-				skip_space_tab(&res_content_length_header);
+				total_read_res_body_bytes = res_after_read_data - res_crlfcrlf - 4 /* strlen("\r\n\r\n") */;
+				skip_space_tab(&res_content_length_header, res_after_read_data);
 				res_body_length = stoui(res_content_length_header, 8 /* octets */, '\r');
 				// `CHUNKED_ENCODING` is reserved for, well, chunked encoding
 				if (res_body_length == CHUNKED_ENCODING) {
 					NOTIFY_ERR(RES_HEADERS_IMPROPER);
 					goto serve__main__near_end;
 				}
-			} else if (res_transfer_encoding_header != NULL) do {
+			} else if (res_transfer_encoding_header != NULL) {
 				// parse `Transfer-Encoding` header
 				res_transfer_encoding_header += 18 /* strlen("Transfer-Encoding:") */;
 				// skip over spaces and tabs
-				skip_space_tab(&res_transfer_encoding_header);
+				skip_space_tab(&res_transfer_encoding_header, res_after_read_data);
 				// ensure that the value of the `Transfer-Encoding` header is "chunked"
-				if (res_crlfcrlf - res_transfer_encoding_header < 7 /* strlen("chunked") */ ||
-					strncasecmp(res_transfer_encoding_header, "chunked", 7 /* strlen("chunked") */) != 0) {
-					break;
+				if (res_crlfcrlf - res_transfer_encoding_header >= 7 /* strlen("chunked") */ ||
+					strncasecmp(res_transfer_encoding_header, "chunked", 7 /* strlen("chunked") */) == 0) {
+					res_body_length = CHUNKED_ENCODING;
 				}
-				res_body_length = CHUNKED_ENCODING;
-			} while (0);
+			}
 
 			// parse the `Connection` header and save the address of the CR at the end of it for `force_connection_close`
 			char *after_res_connection_header = res_connection_header;
 			if (!r_arg(force_connection_close) && res_connection_header != NULL) {
-				skip_space_tab(&after_res_connection_header);
+				skip_space_tab(&after_res_connection_header, res_after_read_data);
 				if (res_crlfcrlf - after_res_connection_header >= 5 /* strlen("close") */ &&
 					strncasecmp(after_res_connection_header, "close", 5 /* "length" of the previous argument */) == 0) {
 					http_keep_alive = 0;
 				}
 				after_res_connection_header += 5 /* strlen("close") */;
-				skip_space_tab(&after_res_connection_header);
+				skip_space_tab(&after_res_connection_header, res_after_read_data);
 				if (*after_res_connection_header != '\r') {
 					http_keep_alive = 1;
 					++after_res_connection_header;
 				}
-				skip_to_cr(&after_res_connection_header);
+				skip_to_cr(&after_res_connection_header, res_after_read_data);
 			}
 
 			// earlier, a few bytes were read into `prtcl_id`
@@ -320,7 +335,7 @@ void *serve(char *buf) {
 					}
 				}
 				int chunk_size = 0;
-				int remaining_in_buf = after_read_data - chunk;
+				int remaining_in_buf = res_after_read_data - chunk;
 				char res_crlfcrlf_c = 0;
 
 				// loop until the final chunk is found
@@ -439,7 +454,7 @@ void *serve(char *buf) {
 			} else {
 				// handles `Content-Length` or no length
 				if (r_arg(force_connection_close)) {
-					if (SSL_write(ssl, res_crlfcrlf + 4, after_read_data - res_crlfcrlf - 4) < 0) {
+					if (SSL_write(ssl, res_crlfcrlf + 4, res_after_read_data - res_crlfcrlf - 4) < 0) {
 						goto serve__main__near_end;
 					}
 				} else {
@@ -470,6 +485,8 @@ void *serve(char *buf) {
 
 	// to-do: websockets
 
+	#undef NOTIFY_ERR
+
 	serve__main__near_end:;
 	// clean-up
 	if (ssl != NULL) {
@@ -484,9 +501,9 @@ void *serve(char *buf) {
 	goto serve__main__start;
 
 	serve__general__err:;
-	if (buf != NULL) {
-		free(buf);
-		buf = NULL;
+	if (h_buf != NULL) {
+		free(h_buf);
+		h_buf = NULL;
 	}
 	// if this is the last thread doing anything, then exit the program
 	if (!(--r_arg(thread_count))) {

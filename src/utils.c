@@ -71,7 +71,7 @@ long unsigned int stoui(char *str, unsigned char max_size, char end_char) {
 
 // to-do: this can be improved
 // e.g. some strings may begin with the same bytes
-struct http_service *find_service(char *name) {
+struct http_service *regular_find_service(char *name) {
 	for (unsigned int i = 0; i < r_arg(n_http_services); ++i) {
 		if (strncmp(name, r_arg(http_services)[i].name, r_arg(http_services)[i].name_len) == 0 &&
 			name[r_arg(http_services)[i].name_len] == '\r') {
@@ -84,9 +84,19 @@ struct http_service *find_service(char *name) {
 	}
 	return r;
 }
+// `init_find_service` will probably be used later
+struct http_service *init_find_service(char *name) {
+	find_service = &regular_find_service;
+	return find_service(name);
+}
+//struct http_service *(*find_service)(char *name) = &init_find_service;
+struct http_service *(*find_service)(char *name) = &regular_find_service;
 
-void skip_space_tab(char **str) {
+void skip_space_tab(char **str, char *after_str) {
 	skip_space_tab_start:;
+	if (*str >= after_str) {
+		return;
+	}
 	switch (**str) {
 		case ' ':
 		case '\t': {
@@ -95,11 +105,11 @@ void skip_space_tab(char **str) {
 		}
 	}
 }
-void skip_to_cr(char **str) {
+void skip_to_cr(char **str, char *after_str) {
 	if (str == NULL || *str == NULL) {
 		return;
 	}
-	while (**str != '\r') {
+	while (*str < after_str && **str != '\r') {
 		if (**str == 0) {
 			*str = NULL;
 			return;
@@ -110,13 +120,14 @@ void skip_to_cr(char **str) {
 
 // to-do: this can be improved
 // e.g. some strings may begin with the same bytes
-void find_headers(char *str, char *str_end, short unsigned int n, ...) {
+void find_headers(char *str, char *str_end, unsigned int n, ...) {
 	if (!n) {
 		return;
 	}
 	--str_end;
 	struct entry {
-		char **str;
+		char **target;
+		char *str;
 		size_t len;
 		struct entry *next;
 	};
@@ -126,14 +137,22 @@ void find_headers(char *str, char *str_end, short unsigned int n, ...) {
 	va_list args;
 	va_start(args, n);
 	for (unsigned int i = 0; i < n; ++i) {
-		list[i].str = va_arg(args, char **);
-		list[i].len = strlen(*(list[i].str));
-		list[i].next = list + i + 1;
+		(*entry)->str = va_arg(args, char *);
+		(*entry)->target = va_arg(args, char **);
+		if (*((*entry)->target) != NULL) {
+			*entry = list + i + 1;
+			continue;
+		}
+		(*entry)->len = strlen((*entry)->str);
+		(*entry)->next = list + i + 1;
+		entry = &((*entry)->next);
 	}
 	char **crlfcrlf = va_arg(args, char **);
-	*crlfcrlf = NULL;
+	if (*crlfcrlf != NULL) {
+		return;
+	}
+	*entry = NULL;
 	va_end(args);
-	list[n - 1].next = NULL;
 	while (str < str_end) {
 		if (*str == '\r' && *(str + 1) == '\n') {
 			*crlfcrlf = str - 2;
@@ -141,27 +160,29 @@ void find_headers(char *str, char *str_end, short unsigned int n, ...) {
 		}
 		entry = &head;
 		while (*entry != NULL) {
-			if (strncasecmp(str, *((*entry)->str), (*entry)->len) == 0 &&
+			if (strncasecmp(str, (*entry)->str, (*entry)->len) == 0 &&
 				str + (*entry)->len < str_end &&
 				*(str + (*entry)->len) == ':') {
-				*((*entry)->str) = str;
+				*((*entry)->target) = str;
+				skip_to_cr(&str, str_end);
+				if (str == NULL) {
+					*((*entry)->target) = NULL;
+					return;
+				}
 				*entry = (*entry)->next;
-				break;
+				str += 2;
+				goto find_headers__str_while;
 			}
 			entry = &((*entry)->next);
 		}
 
-		skip_to_cr(&str);
+		skip_to_cr(&str, str_end);
 		if (str == NULL) {
 			return;
 		}
 		str += 2;
-	}
 
-	entry = &head;
-	while (*entry != NULL) {
-		*((*entry)->str) = NULL;
-		entry = &((*entry)->next);
+		find_headers__str_while:;
 	}
 }
 
