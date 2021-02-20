@@ -1,4 +1,4 @@
-// to-do count: 2
+// to-do count: 3
 
 #include <stdarg.h>
 
@@ -186,6 +186,7 @@ void find_headers(char *str, char *str_end, unsigned int n, ...) {
 	}
 }
 
+// to-do: respond with text/html instead of text/plain for `<title>` and css
 void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *res_body) {
 	if (protocol_id != 1) {
 		return;
