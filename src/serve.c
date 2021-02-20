@@ -305,7 +305,7 @@ void *serve(void *unused) {
 					http_keep_alive = 1;
 					++after_res_connection_header;
 				}
-				skip_to_cr(&after_res_connection_header, res_after_read_data);
+				skip_to_crlf(&after_res_connection_header, res_after_read_data);
 			}
 
 			// earlier, a few bytes were read into `prtcl_id`

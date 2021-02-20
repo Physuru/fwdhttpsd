@@ -12,8 +12,8 @@ extern struct http_service *(*find_service)(char *name);
 #define stoui8(x) stoui(x, 1, 0)
 void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *res_body);
 void skip_space_tab(char **str, char *after_str);
-void skip_to_cr(char **str, char *after_str);
-void find_headers(char *, char *, unsigned int, ...);
+void skip_to_crlf(char **str, char *after_str);
+void find_headers(char *ssl, char *str, unsigned int n, ...);
 
 void quick_respond_err(SSL *ssl, unsigned char protocol_id, unsigned char err_id);
 #define CLIENT_PRTCL_NOT_IMPLEMENTED 0

@@ -105,17 +105,20 @@ void skip_space_tab(char **str, char *after_str) {
 		}
 	}
 }
-void skip_to_cr(char **str, char *after_str) {
+void skip_to_crlf(char **str, char *after_str) {
 	if (str == NULL || *str == NULL) {
 		return;
 	}
-	while (*str < after_str && **str != '\r') {
-		if (**str == 0) {
-			*str = NULL;
+	--after_str;
+	while (*str < after_str) {
+		if (**str == '\r' && *(*str + 1) == '\n') {
 			return;
+		} else if (**str == 0) {
+			break;
 		}
 		++*str;
 	}
+	*str = NULL;
 }
 
 // to-do: this can be improved
@@ -124,6 +127,7 @@ void find_headers(char *str, char *str_end, unsigned int n, ...) {
 	if (!n) {
 		return;
 	}
+	char *passed_str_end = str_end;
 	--str_end;
 	struct entry {
 		char **target;
@@ -164,7 +168,7 @@ void find_headers(char *str, char *str_end, unsigned int n, ...) {
 				str + (*entry)->len < str_end &&
 				*(str + (*entry)->len) == ':') {
 				*((*entry)->target) = str;
-				skip_to_cr(&str, str_end);
+				skip_to_crlf(&str, passed_str_end);
 				if (str == NULL) {
 					*((*entry)->target) = NULL;
 					return;
@@ -176,7 +180,7 @@ void find_headers(char *str, char *str_end, unsigned int n, ...) {
 			entry = &((*entry)->next);
 		}
 
-		skip_to_cr(&str, str_end);
+		skip_to_crlf(&str, passed_str_end);
 		if (str == NULL) {
 			return;
 		}
