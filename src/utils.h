@@ -5,7 +5,7 @@
 
 unsigned char setuidgid(int uid, int gid, int chkn_uid, int chkn_gid);
 long unsigned int stoui(char *str, unsigned char max_size, char end_char);
-extern struct http_service *(*find_service)(char *name);
+extern struct http_service *(*find_service)(char *name, char *after_buf);
 #define stoui64(x) stoui(x, 8, 0)
 #define stoui32(x) stoui(x, 4, 0)
 #define stoui16(x) stoui(x, 2, 0)
@@ -25,5 +25,6 @@ void quick_respond_err(SSL *ssl, unsigned char protocol_id, unsigned char err_id
 #define HTTP_VERSION_MISMATCH 6
 #define RES_HEADERS_TOO_LONG 7
 #define RES_HEADERS_IMPROPER 8
+#define REQ_HEADERS_IMPROPER 9
 
 #endif

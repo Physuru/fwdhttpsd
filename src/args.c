@@ -48,6 +48,12 @@ int parse_args(char *argv[], char *env[]) {
 				return 0;
 			}
 			if ((argv[i + 2] != NULL && *argv[i + 2] != '-')) {
+				unsigned char chr;
+				for (unsigned int ii = 0; (chr = argv[i + 1][ii]); ++ii) {
+					if ((chr < 'A' || chr > 'Z') && chr - '-' > 1 /* - and . */ && (chr < '0' || chr > '9')) {
+						continue;
+					}
+				}
 				r_arg(http_services) = realloc(r_arg(http_services), sizeof(struct http_service) * ++r_arg(n_http_services));
 				r_arg(http_services)[r_arg(n_http_services) - 1].name = argv[i + 1];
 				r_arg(http_services)[r_arg(n_http_services) - 1].name_len = strlen(argv[i + 1]);
@@ -75,11 +81,11 @@ int parse_args(char *argv[], char *env[]) {
 		}
 	}
 	if (r_arg(cert_path) == NULL) {
-		fputs("required argument `-c` is missing a value\n", stderr);
+		fprintf(stderr, "required argument `%s` is missing a value\n", "-c");
 		return 0;
 	}
 	if (r_arg(private_key_path) == NULL) {
-		fputs("required argument `-k` is missing a value\n", stderr);
+		fprintf(stderr, "required argument `%s` is missing a value\n", "-k");
 		return 0;
 	}
 	if (r_arg(uid) == 0 || r_arg(uid) == 0) {
@@ -90,6 +96,14 @@ int parse_args(char *argv[], char *env[]) {
 				r_arg(gid) = stoui32(&env[i][9]);
 			}
 		}
+	}
+	if (r_arg(thread_count) < 1 || r_arg(thread_count) > 0xFFFF) {
+		fprintf(stderr, "invalid value for `%s`\n", "-t");
+		return 0;
+	}
+	if (r_arg(buf_sz) < 0x100) {
+		fprintf(stderr, "invalid value for `%s`\n", "-b");
+		return 0;
 	}
 	return 1;
 	#undef CHECK_ARG

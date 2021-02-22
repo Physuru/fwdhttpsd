@@ -50,14 +50,6 @@ int main(int argc, char *argv[], char *env[]) {
 	if (!parse_args(argv, env)) {
 		clean_then_exit();
 	}
-	if (r_arg(thread_count) < 1 || r_arg(thread_count) > 0xFFFF) {
-		fprintf(stderr, "invalid value for `%s`\n", "-t");
-		clean_then_exit();
-	}
-	if (r_arg(buf_sz) < 0x100) {
-		fprintf(stderr, "invalid value for `%s`\n", "-b");
-		clean_then_exit();
-	}
 	// we don't need root anymore
 	if ((old_uid != 0 && old_uid != r_arg(uid)) ||
 		(old_gid != 0 && old_gid != r_arg(gid)) ||

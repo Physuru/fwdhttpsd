@@ -71,9 +71,10 @@ long unsigned int stoui(char *str, unsigned char max_size, char end_char) {
 
 // to-do: this can be improved
 // e.g. some strings may begin with the same bytes
-struct http_service *regular_find_service(char *name) {
+struct http_service *regular_find_service(char *name, char *after_buf) {
 	for (unsigned int i = 0; i < r_arg(n_http_services); ++i) {
-		if (strncmp(name, r_arg(http_services)[i].name, r_arg(http_services)[i].name_len) == 0 &&
+		if (name + r_arg(http_services)[i].name_len < after_buf &&
+			strncmp(name, r_arg(http_services)[i].name, r_arg(http_services)[i].name_len) == 0 &&
 			name[r_arg(http_services)[i].name_len] == '\r') {
 			return r_arg(http_services) + i;
 		}
@@ -85,12 +86,12 @@ struct http_service *regular_find_service(char *name) {
 	return r;
 }
 // `init_find_service` will probably be used later
-struct http_service *init_find_service(char *name) {
+struct http_service *init_find_service(char *name, char *after_buf) {
 	find_service = &regular_find_service;
-	return find_service(name);
+	return find_service(name, after_buf);
 }
 //struct http_service *(*find_service)(char *name) = &init_find_service;
-struct http_service *(*find_service)(char *name) = &regular_find_service;
+struct http_service *(*find_service)(char *name, char *after_buf) = &regular_find_service;
 
 void skip_space_tab(char **str, char *after_str) {
 	skip_space_tab_start:;
@@ -157,9 +158,16 @@ void find_headers(char *str, char *str_end, unsigned int n, ...) {
 	}
 	*entry = NULL;
 	va_end(args);
+	if (str < str_end && *str == '\r') {
+		++*str;
+		// this is safe because of `--str_end`, earlier in the code
+		if (*str == '\n') {
+			++*str;
+		}
+	}
 	while (str < str_end) {
 		if (*str == '\r' && *(str + 1) == '\n') {
-			*crlfcrlf = str - 2;
+			*crlfcrlf = str - 2 /* the previous two characters are guaranteed to be cr, lf */;
 			break;
 		}
 		entry = &head;
@@ -205,13 +213,13 @@ void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *res_
 	char str[len];
 	char *ptr = str;
 
-	strncpy(ptr, "HTTP/1.1 ", 9);
+	memcpy(ptr, "HTTP/1.1 ", 9);
 	ptr += 9;
 
-	strncpy(ptr, status, status_len);
+	memcpy(ptr, status, status_len);
 	ptr += status_len;
 
-	strncpy(ptr, "\r\nConnection: close\r\nContent-Length: ", 37);
+	memcpy(ptr, "\r\nConnection: close\r\nContent-Length: ", 37);
 	ptr += 37;
 
 	struct uitos x = uitos(res_body_len);
@@ -224,7 +232,7 @@ void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *res_
 	*(ptr++) = '\r';
 	*(ptr++) = '\n';
 
-	strncpy(ptr, res_body, res_body_len);
+	memcpy(ptr, res_body, res_body_len);
 
 	SSL_write(ssl, str, len);
 }

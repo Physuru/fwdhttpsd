@@ -137,7 +137,7 @@ void *serve(void *unused) {
 	char *srv_name = req_host_header + 5 /* strlen("Host:") */;
 	skip_space_tab(&srv_name, req_after_read_data);
 	// `Host` header value -> `struct http_service`
-	struct http_service *service = find_service(srv_name);
+	struct http_service *service = find_service(srv_name, req_crlfcrlf);
 	if (service == NULL) {
 		NOTIFY_ERR(INVALID_SERVICE);
 		goto serve__main__near_end;
@@ -156,13 +156,14 @@ void *serve(void *unused) {
 	}
 
 	// send the initial request to the http server
-	write(service_socket, buf, read_bytes);
+	if (write(service_socket, buf, read_bytes) < 0) {
+		goto serve__main__near_end;
+	}
 	while (req_read < req_content_length || SSL_has_pending(ssl)) {
 		read_bytes = SSL_read(ssl, buf, r_arg(buf_sz));
-		if (read_bytes < 0) {
+		if (read_bytes < 0 || write(service_socket, buf, read_bytes) < 0) {
 			goto serve__main__near_end;
 		}
-		write(service_socket, buf, read_bytes);
 		req_read += read_bytes;
 	}
 
@@ -440,7 +441,9 @@ void *serve(void *unused) {
 					for (int x = 0; x < 2; ++x) {
 						char c;
 						if (!remaining_in_buf) {
-							read(service_socket, &c, 1);
+							if (read(service_socket, &c, 1) != 1) {
+								goto serve__main__near_end;
+							}
 						} else {
 							c = *(chunk++);
 							--remaining_in_buf;
