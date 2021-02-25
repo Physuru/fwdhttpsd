@@ -1,3 +1,5 @@
+// to-do count: 1
+
 #include "args.h"
 #include "exit.h"
 #include "general.h"
@@ -14,7 +16,7 @@ int main(int argc, char *argv[], char *env[]) {
 	// write warning to `stdout` and `stderr` if `(char)(-1)` is not equal to `0xFF`
 	if ((unsigned char)(-1) != 0xFF) {
 		for (char fd = STDOUT_FILENO; fd <= STDERR_FILENO; ++fd) {
-			write(fd, "assumptions broken - either this system does not use two's complement to store negative integers, or a byte is not equal to 8 bits on your system. this program may not work as intended on your system.\n", 201);
+			while (write(fd, "assumptions broken - either this system does not use two's complement to store negative integers, or a byte is not equal to 8 bits on your system. this program may not work as intended on your system.\n", 201) <= 0);
 		}
 	}
 	// main thread id
@@ -35,6 +37,7 @@ int main(int argc, char *argv[], char *env[]) {
 		clean_then_exit();
 	}
 	// set up socket
+	// to-do: support ipv6 here, and for service_socket in serve.c
 	sv_socket = socket(AF_INET, SOCK_STREAM, 0);
 	sv_addr.sin_family = AF_INET;
 	sv_addr.sin_addr.s_addr = INADDR_ANY;

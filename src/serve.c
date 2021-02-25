@@ -12,7 +12,7 @@
 #include "utils.h"
 
 void *serve(void *unused) {
-	char *h_buf = NULL, *buf = NULL;
+	char *h_buf = NULL, *buf = NULL; // signedness doesn't really matter for `h_buf` or `buf`
 	if (r_arg(use_stack_buf)) {
 		buf = alloca(r_arg(buf_sz));	
 	} else {
@@ -209,8 +209,9 @@ void *serve(void *unused) {
 
 	serve__prtcl_1: for (;;) {
 		/*
-			to-do: potentially "refill" `buf` if `res_crlfcrlf` isn't found.
-		           (maybe do the same for request headers, too!)
+			to-do:
+			potentially "refill" `buf` if `res_crlfcrlf` isn't found.
+			(maybe do the same for request headers, too!)
 		*/
 		// check if there's any data to read
 		struct pollfd pollfds[] = {
@@ -233,6 +234,7 @@ void *serve(void *unused) {
 		if (pollfds[1].revents & POLLIN) {
 			unsigned char http_keep_alive = 1;
 			unsigned long long int res_body_length = 0, total_read_res_body_bytes = 0;
+			unsigned char n_tried_find_headers = 0;
 
 			read_bytes = read(service_socket, buf, r_arg(buf_sz));
 			// there are a lot of checks similar to the following one in this section. they exist in-case a connection suddenly breaks.
@@ -256,45 +258,46 @@ void *serve(void *unused) {
 			char *res_connection_header = NULL;
 			char *res_content_length_header = NULL;
 			char *res_transfer_encoding_header = NULL;
+			char *after_res_connection_header = NULL;
 			// to-do: consider implementing the "Keep-Alive" header
 			// char *keep_alive_header = NULL;
 			char *res_crlfcrlf = NULL;
-			find_headers(buf, res_after_read_data, 3, "Connection", &res_connection_header, "Content-Length", &res_content_length_header, "Transfer-Encoding", &res_transfer_encoding_header, &res_crlfcrlf);
 
-			// check if some response headers didn't fit into `buf`
-			if (res_crlfcrlf == NULL) {
-				NOTIFY_ERR(RES_HEADERS_TOO_LONG);
-				goto serve__main__near_end;
-			}
+			serve__prtcl_1__find_res_headers:;
+
+			find_headers(buf, res_after_read_data, 3, "Connection", &res_connection_header, "Content-Length", &res_content_length_header, "Transfer-Encoding", &res_transfer_encoding_header, &res_crlfcrlf);
+			++n_tried_find_headers;
 
 			// set `res_body_length`
-			if (res_content_length_header != NULL) {
-				// get value of `Content-Length` header as a uint64_t
-				res_content_length_header += 15 /* strlen("Content-Length:") */;
-				// `total_read_res_body_bytes` will be compared to `res_body_length`
-				total_read_res_body_bytes = res_after_read_data - res_crlfcrlf - 4 /* strlen("\r\n\r\n") */;
-				skip_space_tab(&res_content_length_header, res_after_read_data);
-				res_body_length = stoui(res_content_length_header, 8 /* octets */, '\r');
-				// `CHUNKED_ENCODING` is reserved for, well, chunked encoding
-				if (res_body_length == CHUNKED_ENCODING) {
-					NOTIFY_ERR(RES_HEADERS_IMPROPER);
-					goto serve__main__near_end;
-				}
-			} else if (res_transfer_encoding_header != NULL) {
-				// parse `Transfer-Encoding` header
-				res_transfer_encoding_header += 18 /* strlen("Transfer-Encoding:") */;
-				// skip over spaces and tabs
-				skip_space_tab(&res_transfer_encoding_header, res_after_read_data);
-				// ensure that the value of the `Transfer-Encoding` header is "chunked"
-				if (res_crlfcrlf - res_transfer_encoding_header >= 7 /* strlen("chunked") */ ||
-					strncasecmp(res_transfer_encoding_header, "chunked", 7 /* strlen("chunked") */) == 0) {
-					res_body_length = CHUNKED_ENCODING;
+			if (res_body_length == 0) {
+				if (res_content_length_header != NULL) {
+					// get value of `Content-Length` header as a uint64_t
+					res_content_length_header += 15 /* strlen("Content-Length:") */;
+					// `total_read_res_body_bytes` will be compared to `res_body_length`
+					total_read_res_body_bytes = res_after_read_data - res_crlfcrlf - 4 /* strlen("\r\n\r\n") */;
+					skip_space_tab(&res_content_length_header, res_after_read_data);
+					res_body_length = stoui(res_content_length_header, 8 /* octets */, '\r');
+					// `CHUNKED_ENCODING` is reserved for, well, chunked encoding
+					if (res_body_length == CHUNKED_ENCODING) {
+						NOTIFY_ERR(RES_HEADERS_IMPROPER);
+						goto serve__main__near_end;
+					}
+				} else if (res_transfer_encoding_header != NULL) {
+					// parse `Transfer-Encoding` header
+					res_transfer_encoding_header += 18 /* strlen("Transfer-Encoding:") */;
+					// skip over spaces and tabs
+					skip_space_tab(&res_transfer_encoding_header, res_after_read_data);
+					// ensure that the value of the `Transfer-Encoding` header is "chunked"
+					if (res_crlfcrlf - res_transfer_encoding_header >= 7 /* strlen("chunked") */ ||
+						strncasecmp(res_transfer_encoding_header, "chunked", 7 /* strlen("chunked") */) == 0) {
+						res_body_length = CHUNKED_ENCODING;
+					}
 				}
 			}
 
 			// parse the `Connection` header and save the address of the CR at the end of it for `force_connection_close`
-			char *after_res_connection_header = res_connection_header;
-			if (!r_arg(force_connection_close) && res_connection_header != NULL) {
+			if (!r_arg(force_connection_close) && after_res_connection_header == NULL && res_connection_header != NULL) {
+				after_res_connection_header = res_connection_header;
 				skip_space_tab(&after_res_connection_header, res_after_read_data);
 				if (res_crlfcrlf - after_res_connection_header >= 5 /* strlen("close") */ &&
 					strncasecmp(after_res_connection_header, "close", 5 /* "length" of the previous argument */) == 0) {
@@ -307,6 +310,19 @@ void *serve(void *unused) {
 					++after_res_connection_header;
 				}
 				skip_to_crlf(&after_res_connection_header, res_after_read_data);
+			}
+
+			// check if some response headers didn't fit into `buf`
+			if (res_crlfcrlf == NULL) {
+				#if 0
+				if (n_tried_find_headers == 5) {
+				#endif
+					NOTIFY_ERR(RES_HEADERS_TOO_LONG);
+					goto serve__main__near_end;
+				#if 0
+				}
+				goto serve__prtcl_1__find_res_headers;
+				#endif
 			}
 
 			// earlier, a few bytes were read into `prtcl_id`
@@ -329,7 +345,7 @@ void *serve(void *unused) {
 			// handle `Transfer-Encoding: chunked`
 			if (res_body_length == CHUNKED_ENCODING) {
 				// set-up
-				char *chunk = res_crlfcrlf + 4;
+				char *chunk = res_crlfcrlf + 4 /* strlen("\r\n\r\n") */;
 				if (!r_arg(force_connection_close)) {
 					if (SSL_write(ssl, buf, chunk - buf) < 0) {
 						goto serve__main__near_end;
@@ -345,20 +361,24 @@ void *serve(void *unused) {
 					// this parses a maximum of seven (7) ascii-encoded hexadecimal digits
 					for (unsigned char parsed_len_bytes = 0; parsed_len_bytes < 7;) {
 						unsigned char digit;
+
 						if (!remaining_in_buf) {
-							if (read(service_socket, &digit, 1) < 0) {
+							if (read(service_socket, &digit, 1) != 1) {
 								goto serve__main__near_end;
 							}
 						} else {
 							digit = *(chunk++);
 							--remaining_in_buf;
 						}
+
 						if (SSL_write(ssl, &digit, 1) < 0) {
 							goto serve__main__near_end;
 						}
+
 						if (digit == '\r') {
 							break;
 						}
+
 						if (digit >= 'a') {
 							digit -= 87; // 'a' -> 10
 						} else if (digit >= 'A') {
@@ -378,7 +398,7 @@ void *serve(void *unused) {
 					// prevents out-of-bounds memory from being parsed here
 					if (!remaining_in_buf) {
 						chunk = buf;
-						if (read(service_socket, chunk, 1) < 0) {
+						if (read(service_socket, chunk, 1) != 1) {
 							goto serve__main__near_end;
 						}
 						remaining_in_buf = 1;
@@ -393,14 +413,22 @@ void *serve(void *unused) {
 					// the final chunk is guaranteed to have zero-length
 					if (!chunk_size) {
 						// handle trailers
-						res_crlfcrlf_c = 2;
+						res_crlfcrlf_c = 2 /* strlen("\r\n") */;
 						char x;
-						while (res_crlfcrlf_c != 4) {
-							read_bytes = read(service_socket, &x, 1);
-							if (read_bytes < 0 || SSL_write(ssl, &x, read_bytes) < 0) {
+						while (res_crlfcrlf_c != 4 /* strlen("\r\n\r\n") */) {
+							if (remaining_in_buf) {
+								x = *(chunk++);
+								--remaining_in_buf;
+							} else {
+								if ((read_bytes = read(service_socket, &x, 1)) != 1) {
+									goto serve__main__near_end;
+								}
+							}
+							if (SSL_write(ssl, &x, read_bytes) <= 0) {
 								goto serve__main__near_end;
 							}
-							if (x == "\r\n"[res_crlfcrlf_c % 2]) {
+
+							if (x == "\r\n"[res_crlfcrlf_c % 2 /* strlen("\r\n") */]) {
 								++res_crlfcrlf_c;
 							} else {
 								res_crlfcrlf_c = 0;
@@ -438,7 +466,7 @@ void *serve(void *unused) {
 					}
 
 					// "\r\n" directly follows a chunk
-					for (int x = 0; x < 2; ++x) {
+					for (int x = 0; x < 2 /* strlen("\r\n") */; ++x) {
 						char c;
 						if (!remaining_in_buf) {
 							if (read(service_socket, &c, 1) != 1) {
@@ -457,7 +485,7 @@ void *serve(void *unused) {
 			} else {
 				// handles `Content-Length` or no length
 				if (r_arg(force_connection_close)) {
-					if (SSL_write(ssl, res_crlfcrlf + 4, res_after_read_data - res_crlfcrlf - 4) < 0) {
+					if (SSL_write(ssl, res_crlfcrlf + 4 /* strlen("\r\n\r\n") */, res_after_read_data - res_crlfcrlf - 4 /* strlen("\r\n\r\n") */) < 0) {
 						goto serve__main__near_end;
 					}
 				} else {
