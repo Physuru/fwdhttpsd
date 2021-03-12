@@ -11,7 +11,7 @@
 #include "general.h"
 #include "utils.h"
 
-#if 1
+#if 0
 int _SSL_write(void *x, char *data, size_t len) {
 	for (size_t i = 0; i < len; ++i) putc(data[i], stdout);
 	return SSL_write(x, data, len);
