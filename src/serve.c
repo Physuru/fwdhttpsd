@@ -12,8 +12,13 @@
 #include "utils.h"
 
 #if 0
-int _SSL_write(void *x, char *data, size_t len) {
-	for (size_t i = 0; i < len; ++i) putc(data[i], stdout);
+int _SSL_write(void *x, unsigned char *data, size_t len) {
+	for (size_t i = 0; i < len; ++i)
+		if (data[i] >= 0x20 && data[i] <= 0x7e)
+			putc(data[i], stdout);
+		else
+			printf("\\x%02x", data[i]);
+	putchar('\n');
 	return SSL_write(x, data, len);
 }
 #define SSL_write _SSL_write
@@ -329,7 +334,7 @@ void *serve(void *unused) {
 			}
 
 			// parse the `Connection` header and save the address of the CR at the end of it for `force_connection_close`
-			if (!r_arg(force_connection_close) && res_after_connection_header == NULL && res_connection_header != NULL) {
+			if (!sent_connection_close && res_after_connection_header == NULL && res_connection_header != NULL) {
 				res_after_connection_header = res_connection_header;
 				skip_space_tab(&res_after_connection_header, res_after_read_data);
 				if (res_crlfcrlf - res_after_connection_header >= 5 /* strlen("close") */ &&
@@ -354,26 +359,27 @@ void *serve(void *unused) {
 				if (res_crlf == NULL) {
 					// yes, this means that very long headers will not get parsed
 					// that's not something that i care about
-					if (n_read_bytes < 1 ||
+					if (n_read_bytes < 3 ||
 						SSL_write(ssl, offset_buf, n_read_bytes) <= 0) {
 						goto serve__main__near_end;
 					}
-					offset_buf = buf + 1;
+					offset_buf = buf + 3;
 					buf[0] = res_after_read_data[-1];
-					if ((n_read_bytes = read(service_socket, offset_buf, r_arg(buf_sz) - 1)) <= 0) {
+					buf[1] = res_after_read_data[-2];
+					buf[2] = res_after_read_data[-3];
+					if ((n_read_bytes = read(service_socket, offset_buf, r_arg(buf_sz) - 3)) <= 0) {
 						goto serve__main__near_end;
 					}
 					res_after_read_data = offset_buf + n_read_bytes;
 				} else {
 					if (r_arg(force_connection_close) && res_connection_header != NULL && !sent_connection_close) {
-						if (SSL_write(ssl, offset_buf, res_connection_header /* strlen("\r\n") */ - offset_buf) < 0 ||
+						if (SSL_write(ssl, offset_buf, res_connection_header  - offset_buf) < 0 ||
 							SSL_write(ssl, "Connection: close", 17 /* "length" of the previous argument */) < 0 ||
 							SSL_write(ssl, res_after_connection_header, res_after_read_data - res_after_connection_header) < 0) {
 							goto serve__main__near_end;
 						}
 						sent_connection_close = 1;
-					}
-					if (SSL_write(ssl, offset_buf, res_crlf + 2 /* strlen("\r\n") */ - offset_buf) <= 0) {
+					} else if (SSL_write(ssl, offset_buf, res_crlf + 2 /* strlen("\r\n") */ - offset_buf) <= 0) {
 						goto serve__main__near_end;
 					}
 					unsigned int unprocessed_byte_count = res_after_read_data - res_crlf - 2 /* strlen("\r\n") */;
@@ -387,7 +393,8 @@ void *serve(void *unused) {
 				goto serve__prtcl_1__find_res_headers;
 			}
 			if (r_arg(force_connection_close) && res_connection_header != NULL && !sent_connection_close) {
-				if (SSL_write(ssl, offset_buf, res_connection_header /* strlen("\r\n") */ - offset_buf) < 0 ||
+				printf("%p\n", res_after_connection_header);
+				if (SSL_write(ssl, offset_buf, res_connection_header - offset_buf) < 0 ||
 					SSL_write(ssl, "Connection: close", 17 /* "length" of the previous argument */) < 0 ||
 					SSL_write(ssl, res_after_connection_header, res_crlfcrlf + 4 /* strlen("\r\n\r\n") */ - res_after_connection_header) < 0) {
 					goto serve__main__near_end;
@@ -538,8 +545,8 @@ void *serve(void *unused) {
 						}
 					}
 				}
-			} else {
-				// handles `Content-Length` or no length
+			} else if (res_body_length) {
+				// handles `Content-Length`
 				if (SSL_write(ssl, res_crlfcrlf + 4 /* strlen("\r\n\r\n") */, res_after_read_data - res_crlfcrlf - 4 /* strlen("\r\n\r\n") */) < 0) {
 					goto serve__main__near_end;
 				}
