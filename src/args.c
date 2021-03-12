@@ -10,10 +10,11 @@
 short unsigned int r_arg(timeout) = TIMEOUT_DEFAULT;
 unsigned char r_arg(force_connection_close) = 0;
 unsigned char r_arg(use_stack_buf) = 0;
-int r_arg(uid);
-int r_arg(gid);
-char *r_arg(cert_path);
-char *r_arg(private_key_path);
+int r_arg(uid) = 0;
+int r_arg(gid) = 0;
+char *r_arg(cert_path) = NULL;
+char *r_arg(private_key_path) = NULL;
+unsigned char r_arg(use_ipv4) = 0;
 short unsigned int r_arg(thread_count) = THREAD_COUNT_DEFAULT, r_arg(buf_sz) = BUF_SZ_DEFAULT;
 struct http_service *r_arg(http_services) = NULL;
 struct http_service r_arg(default_http_service) = (struct http_service){ .name = NULL, 0 };
@@ -28,6 +29,15 @@ int parse_args(char *argv[], char *env[]) {
 		y = z(argv[i + 1]); \
 		i += 2; \
 	}
+	#define ARG_S(x, y, z) (strcmp(argv[i], x) == 0) { \
+		if (argv[i + 1] == NULL || (argv[i + 1] != NULL && argv[i + 1][0] == '-')) { \
+			y = 1; \
+			++i; \
+		} else { \
+			y = z(argv[i + 1]); \
+			i += 2; \
+		} \
+	}
 	unsigned int i = 1;
 	while (argv[i]) {
 		if ARG_COMMON("-u", r_arg(uid), stoui32)
@@ -37,6 +47,8 @@ int parse_args(char *argv[], char *env[]) {
 		else if ARG_COMMON("-t", r_arg(thread_count), stoui16)
 		else if ARG_COMMON("-w", r_arg(timeout), stoui16)
 		else if ARG_COMMON("-b", r_arg(buf_sz), stoui16)
+		else if ARG_S("-4", r_arg(use_ipv4), stoui8)
+		else if ARG_S("-f", r_arg(force_connection_close), stoui8)
 		else if (strcmp(argv[i], "-s") == 0) {
 			if (r_arg(n_http_services) == 0xFFFFFFFF) {
 				fputs("cannot add any more http services\n", stderr);
@@ -65,10 +77,7 @@ int parse_args(char *argv[], char *env[]) {
 				r_arg(default_http_service).port = htons(stoui16(argv[i + 1]));
 				i += 2;
 			}
-		} else if (strcmp(argv[i], "-f") == 0) {
-			r_arg(force_connection_close) = 1;
-			i += 1;
-		}  else if (strcmp(argv[i], "-a") == 0) {
+		} else if (strcmp(argv[i], "-a") == 0) {
 			fputs("-a is unsafe and shouldn't be used\n", stderr);
 			r_arg(use_stack_buf) = 1;
 			i += 1;

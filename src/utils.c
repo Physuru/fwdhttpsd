@@ -124,9 +124,9 @@ void skip_to_crlf(char **str, char *after_str) {
 
 // to-do: this can be improved
 // e.g. some strings may begin with the same bytes
-void find_headers(char *str, char *str_end, unsigned int n, ...) {
+char find_headers(char *str, char *str_end, unsigned int n, ...) {
 	if (!n) {
-		return;
+		return 0;
 	}
 	char *passed_str_end = str_end;
 	--str_end;
@@ -153,20 +153,30 @@ void find_headers(char *str, char *str_end, unsigned int n, ...) {
 		entry = &((*entry)->next);
 	}
 	char **crlfcrlf = va_arg(args, char **);
+	char **last_found_crlf = va_arg(args, char **);
+	*last_found_crlf = NULL;
 	if (*crlfcrlf != NULL) {
-		return;
+		return 3;
 	}
 	*entry = NULL;
 	va_end(args);
-	if (str < str_end && *str == '\r') {
-		++*str;
-		// this is safe because of `--str_end`, earlier in the code
-		if (*str == '\n') {
+	if (str < str_end) {
+		if (*str == '\r') {
 			++*str;
+			if (*str == '\n') {
+				// not setting last_found_crlf here
+				++*str;
+			}
+		} else if (*str == '\n') {
+			++*str;
+			if (*str == '\r') {
+				return 0;
+			}
 		}
 	}
 	while (str < str_end) {
 		if (*str == '\r' && *(str + 1) == '\n') {
+			*last_found_crlf = str;
 			*crlfcrlf = str - 2 /* the previous two characters are guaranteed to be cr, lf */;
 			break;
 		}
@@ -179,7 +189,7 @@ void find_headers(char *str, char *str_end, unsigned int n, ...) {
 				skip_to_crlf(&str, passed_str_end);
 				if (str == NULL) {
 					*((*entry)->target) = NULL;
-					return;
+					return 2;
 				}
 				*entry = (*entry)->next;
 				str += 2;
@@ -190,12 +200,15 @@ void find_headers(char *str, char *str_end, unsigned int n, ...) {
 
 		skip_to_crlf(&str, passed_str_end);
 		if (str == NULL) {
-			return;
+			return 2;
 		}
+		*last_found_crlf = str;
 		str += 2;
 
 		find_headers__str_while:;
 	}
+
+	return 1;
 }
 
 // to-do: respond with text/html instead of text/plain for `<title>` and css
@@ -208,33 +221,15 @@ void quick_respond(SSL *ssl, unsigned char protocol_id, char *status, char *res_
 	if (status_len < 0 || res_body_len < 0) {
 		return;
 	}
-	unsigned long long len = 9 + status_len + 51 /* 37 + 4 + 10 */ + res_body_len + 1 /* probably unnecessary safety byte */;
-	//                                                       ^ the max value of 31 (and 32) bits can be represented in base 10 using 10 digits
-	char str[len];
-	char *ptr = str;
 
-	memcpy(ptr, "HTTP/1.1 ", 9);
-	ptr += 9;
-
-	memcpy(ptr, status, status_len);
-	ptr += status_len;
-
-	memcpy(ptr, "\r\nConnection: close\r\nContent-Length: ", 37);
-	ptr += 37;
-
+	SSL_write(ssl, "HTTP/1.1 ", 9);
+	SSL_write(ssl, status, status_len);
+	SSL_write(ssl, "\r\nConnection: close\r\nContent-Length: ", 37);
 	struct uitos x = uitos(res_body_len);
-	strncpy(ptr, x.str, x.str_len);
+	SSL_write(ssl, x.str, x.str_len);
 	free(x.str);
-	ptr += x.str_len;
-
-	*(ptr++) = '\r';
-	*(ptr++) = '\n';
-	*(ptr++) = '\r';
-	*(ptr++) = '\n';
-
-	memcpy(ptr, res_body, res_body_len);
-
-	SSL_write(ssl, str, len);
+	SSL_write(ssl, "\r\n\r\n", 4);
+	SSL_write(ssl, res_body, res_body_len);
 }
 void quick_respond_err(SSL *ssl, unsigned char protocol_id, unsigned char err_id) {
 	switch (err_id) {
@@ -244,6 +239,10 @@ void quick_respond_err(SSL *ssl, unsigned char protocol_id, unsigned char err_id
 		}
 		case (REQ_HEADERS_TOO_LONG): {
 			quick_respond(ssl, protocol_id, "400 Bad Request", "Request HTTP header section is too long.");
+			return;
+		}
+		case (REQ_HEADERS_IMPROPER): {
+			quick_respond(ssl, protocol_id, "400 Bad Request", "Request HTTP header section is probably broken.");
 			return;
 		}
 		case (NO_HOST_HEADER): {
@@ -271,7 +270,7 @@ void quick_respond_err(SSL *ssl, unsigned char protocol_id, unsigned char err_id
 			return;
 		}
 		case (RES_HEADERS_IMPROPER): {
-			quick_respond(ssl, protocol_id, "502 Bad Gateway", "Response HTTP header section is too long.");
+			quick_respond(ssl, protocol_id, "502 Bad Gateway", "Response HTTP header section is probably broken.");
 			return;
 		}
 	}

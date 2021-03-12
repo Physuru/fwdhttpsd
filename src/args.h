@@ -16,6 +16,7 @@ extern int r_arg(uid);
 extern int r_arg(gid);
 extern char *r_arg(cert_path);
 extern char *r_arg(private_key_path);
+extern unsigned char r_arg(use_ipv4);
 extern short unsigned int r_arg(buf_sz) /* `buf` size */, r_arg(thread_count) /* the amount of threads that will accept incoming data */;
 extern struct http_service *r_arg(http_services);
 extern struct http_service r_arg(default_http_service);

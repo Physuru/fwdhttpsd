@@ -1,5 +1,3 @@
-// to-do count: 1
-
 #include "args.h"
 #include "exit.h"
 #include "general.h"
@@ -21,9 +19,10 @@ int main(int argc, char *argv[], char *env[]) {
 	}
 	// main thread id
 	main_pthread_id = pthread_self();
-	// network byte order
-	_127_0_0_1 = htonl(_127_0_0_1);
-	_443 = htons(_443);
+	// args
+	if (!parse_args(argv, env)) {
+		clean_then_exit();
+	}
 	// set up singal handlers
 	signal(SIGINT, sigint_handler);
 	signal(SIGPIPE, SIG_IGN);
@@ -37,20 +36,32 @@ int main(int argc, char *argv[], char *env[]) {
 		clean_then_exit();
 	}
 	// set up socket
-	// to-do: support ipv6 here, and for service_socket in serve.c
-	sv_socket = socket(AF_INET, SOCK_STREAM, 0);
-	sv_addr.sin_family = AF_INET;
-	sv_addr.sin_addr.s_addr = INADDR_ANY;
-	// try to listen on port 443
+	struct sockaddr_in sv_addr = { 0 };
+	size_t sv_addr_sz = 0;
+	if (r_arg(use_ipv4)) {
+		sv_socket = socket(AF_INET, SOCK_STREAM, 0);
+		sv_addr_sz = sizeof(struct sockaddr_in);
+		struct sockaddr_in *sv_addr_4 = (struct sockaddr_in *)&sv_addr;
+		sv_addr_4->sin_family = AF_INET;
+		sv_addr_4->sin_addr.s_addr = INADDR_ANY;
+		sv_addr_4->sin_port = htons(443);
+		ipv4_loopback.s_addr = htonl(ipv4_loopback.s_addr);
+	} else {
+		sv_socket = socket(AF_INET6, SOCK_STREAM, 0);
+		sv_addr_sz = sizeof(struct sockaddr_in6);
+		struct sockaddr_in6 *sv_addr_6 = (struct sockaddr_in6 *)&sv_addr;
+		sv_addr_6->sin6_family = AF_INET6;
+		sv_addr_6->sin6_addr = in6addr_any;
+		sv_addr_6->sin6_port = htons(443);
+		short unsigned int is_le = 0x1234;
+		is_le = *(unsigned char *)&is_le == 0x34;
+		ipv6_loopback.s6_addr[is_le ? 15 : 0] = 1;
+	}
+	// try to bind to port 443
 	int opt = 1;
 	setsockopt(sv_socket, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
-	sv_addr.sin_port = _443;
-	if (bind(sv_socket, (struct sockaddr *)&sv_addr, sizeof(sv_addr)) < 0 ||
+	if (bind(sv_socket, (struct sockaddr *)&sv_addr, sv_addr_sz) < 0 ||
 		listen(sv_socket, 0) < 0) {
-		clean_then_exit();
-	}
-	// args
-	if (!parse_args(argv, env)) {
 		clean_then_exit();
 	}
 	// we don't need root anymore

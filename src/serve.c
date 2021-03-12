@@ -1,4 +1,4 @@
-// to-do count: 5
+// to-do count: 4
 
 #define POLLRDHUP 0b10000000000000
 #define CHUNKED_ENCODING 0xFFFFFFFFFFFFFFFF
@@ -67,9 +67,9 @@ void *serve(void *unused) {
 	}
 
 	// read the status line, and hopefully all of the headers
-	int read_bytes = SSL_read(ssl, buf, r_arg(buf_sz));
-	if (read_bytes < 16) {
-		//fprintf(stderr, "SSL_read (1) returned %i\n", read_bytes);
+	int n_read_bytes = SSL_read(ssl, buf, r_arg(buf_sz));
+	if (n_read_bytes < 16) {
+		//fprintf(stderr, "SSL_read (1) returned %i\n", n_read_bytes);
 		goto serve__main__near_end;
 	}
 
@@ -78,14 +78,14 @@ void *serve(void *unused) {
 	unsigned char expected_protocol_id = 0;
 
 	// skip past first ` `
-	char *exp_f = memchr(buf, ' ', read_bytes);
+	char *exp_f = memchr(buf, ' ', n_read_bytes);
 	if (exp_f++ == NULL) {
 		NOTIFY_ERR(CLIENT_PRTCL_NOT_IMPLEMENTED);
 		goto serve__main__near_end;
 	}
 	// skip past second space
-	exp_f = memchr(exp_f, ' ', read_bytes + exp_f - buf);
-	if (exp_f++ == NULL || buf + read_bytes - exp_f < 10) {
+	exp_f = memchr(exp_f, ' ', n_read_bytes + exp_f - buf);
+	if (exp_f++ == NULL || buf + n_read_bytes - exp_f < 10) {
 		NOTIFY_ERR(CLIENT_PRTCL_NOT_IMPLEMENTED);
 		goto serve__main__near_end;
 	}
@@ -115,8 +115,12 @@ void *serve(void *unused) {
 	char *req_content_length_header = NULL;
 	unsigned int req_content_length = 0, req_read = 0;
 	char *req_crlfcrlf = NULL;
-	char *req_after_read_data = buf + read_bytes;
-	find_headers(exp_f, req_after_read_data, 2, "Host", &req_host_header, "Content-Length", &req_content_length_header, &req_crlfcrlf);
+	char *req_crlf = NULL;
+	char *req_after_read_data = buf + n_read_bytes;
+	if (!find_headers(exp_f, req_after_read_data, 2, "Host", &req_host_header, "Content-Length", &req_content_length_header, &req_crlfcrlf, &req_crlf)) {
+		NOTIFY_ERR(REQ_HEADERS_IMPROPER);
+		goto serve__main__near_end;
+	}
 
 	if (req_crlfcrlf == NULL) {
 		NOTIFY_ERR(REQ_HEADERS_TOO_LONG);
@@ -131,7 +135,7 @@ void *serve(void *unused) {
 		req_content_length_header += 15 /* strlen("Content-Length:") */;
 		skip_space_tab(&req_content_length_header, req_after_read_data);
 		req_content_length = stoui(req_content_length_header, 4, '\r');
-		req_read = buf + read_bytes - req_crlfcrlf - 4;
+		req_read = buf + n_read_bytes - req_crlfcrlf - 4;
 	}
 	// attempt to parse first `Host` request header
 	char *srv_name = req_host_header + 5 /* strlen("Host:") */;
@@ -144,11 +148,24 @@ void *serve(void *unused) {
 	}
 
 	// connect to the http server
-	int service_socket = socket(AF_INET, SOCK_STREAM, 0);
-	struct sockaddr_in service_addr = { 0 };
-	service_addr.sin_family = AF_INET;
-	service_addr.sin_addr.s_addr = _127_0_0_1;
-	service_addr.sin_port = service->port;
+	int service_socket;
+	struct sockaddr_storage service_addr = { 0 };
+	size_t service_addr_sz = 0;
+	if (r_arg(use_ipv4)) {
+		service_addr_sz = sizeof(struct sockaddr_in);
+		service_socket = socket(AF_INET, SOCK_STREAM, 0);
+		struct sockaddr_in *service_addr_4 = (struct sockaddr_in *)&service_addr;
+		service_addr_4->sin_family = AF_INET;
+		service_addr_4->sin_addr = ipv4_loopback;
+		service_addr_4->sin_port = service->port;
+	} else {
+		service_addr_sz = sizeof(struct sockaddr_in6);
+		service_socket = socket(AF_INET6, SOCK_STREAM, 0);
+		struct sockaddr_in6 *service_addr_6 = (struct sockaddr_in6 *)&service_addr;
+		service_addr_6->sin6_family = AF_INET6;
+		service_addr_6->sin6_addr = ipv6_loopback;
+		service_addr_6->sin6_port = service->port;
+	}
 	if (connect(service_socket, (struct sockaddr *)&service_addr, sizeof(service_addr)) != 0) {
 		fprintf(stderr, "unable to connect to service named `%s`\n", service->name);
 		NOTIFY_ERR(SERVICE_DOWN);
@@ -156,15 +173,15 @@ void *serve(void *unused) {
 	}
 
 	// send the initial request to the http server
-	if (write(service_socket, buf, read_bytes) < 0) {
+	if (write(service_socket, buf, n_read_bytes) < 0) {
 		goto serve__main__near_end;
 	}
 	while (req_read < req_content_length || SSL_has_pending(ssl)) {
-		read_bytes = SSL_read(ssl, buf, r_arg(buf_sz));
-		if (read_bytes < 0 || write(service_socket, buf, read_bytes) < 0) {
+		n_read_bytes = SSL_read(ssl, buf, r_arg(buf_sz));
+		if (n_read_bytes < 0 || write(service_socket, buf, n_read_bytes) < 0) {
 			goto serve__main__near_end;
 		}
-		req_read += read_bytes;
+		req_read += n_read_bytes;
 	}
 
 	// identify server http version
@@ -208,11 +225,7 @@ void *serve(void *unused) {
 	goto serve__main__near_end;
 
 	serve__prtcl_1: for (;;) {
-		/*
-			to-do:
-			potentially "refill" `buf` if `res_crlfcrlf` isn't found.
-			(maybe do the same for request headers, too!)
-		*/
+		puts("pending");
 		// check if there's any data to read
 		struct pollfd pollfds[] = {
 			{ .fd = cl_socket, .events = POLLIN | POLLRDHUP, .revents = 0, },
@@ -225,24 +238,34 @@ void *serve(void *unused) {
 		if (!r_arg(force_connection_close) && (pollfds[0].revents & POLLIN)) {
 			// read from cl_socket and write to service_socket
 			do {
-				read_bytes = SSL_read(ssl, buf, r_arg(buf_sz));
-				if (read_bytes < 0 || write(service_socket, buf, read_bytes) < 0) {
+				n_read_bytes = SSL_read(ssl, buf, r_arg(buf_sz));
+				if (n_read_bytes < 0 || write(service_socket, buf, n_read_bytes) < 0) {
 					goto serve__main__near_end;
 				}
 			} while (SSL_has_pending(ssl));
 		}
 		if (pollfds[1].revents & POLLIN) {
+			// earlier, a few bytes were read into `prtcl_id`
+			// here, they're sent to the client
+			if (prtcl_id_len != 0) {
+				if (SSL_write(ssl, prtcl_id, prtcl_id_len) <= 0) {
+					goto serve__main__near_end;
+				}
+				prtcl_id_len = 0;
+			}
+
 			unsigned char http_keep_alive = 1;
 			unsigned long long int res_body_length = 0, total_read_res_body_bytes = 0;
 			unsigned char n_tried_find_headers = 0;
+			unsigned char sent_connection_close = 0;
 
-			read_bytes = read(service_socket, buf, r_arg(buf_sz));
+			n_read_bytes = read(service_socket, buf, r_arg(buf_sz));
 			// there are a lot of checks similar to the following one in this section. they exist in-case a connection suddenly breaks.
-			if (read_bytes <= 0) {
+			if (n_read_bytes <= 0) {
 				goto serve__main__near_end;
 			}
-			// pointer to the first byte after the read data (`buf + read_bytes`)
-			char *res_after_read_data = buf + read_bytes;
+			// pointer to the first byte after the read data (`buf + n_read_bytes`)
+			char *res_after_read_data = buf + n_read_bytes;
 
 			// error on "Switching Protocols" responses
 			char *status_code_start = memchr(buf, ' ', 9);
@@ -254,18 +277,23 @@ void *serve(void *unused) {
 				}
 			}
 
+			char *offset_buf = buf;
 			// parse response headers
 			char *res_connection_header = NULL;
 			char *res_content_length_header = NULL;
 			char *res_transfer_encoding_header = NULL;
-			char *after_res_connection_header = NULL;
+			char *res_after_connection_header = NULL;
 			// to-do: consider implementing the "Keep-Alive" header
 			// char *keep_alive_header = NULL;
 			char *res_crlfcrlf = NULL;
+			char *res_crlf = NULL;
 
 			serve__prtcl_1__find_res_headers:;
 
-			find_headers(buf, res_after_read_data, 3, "Connection", &res_connection_header, "Content-Length", &res_content_length_header, "Transfer-Encoding", &res_transfer_encoding_header, &res_crlfcrlf);
+			if (!find_headers(buf, res_after_read_data, 3, "Connection", &res_connection_header, "Content-Length", &res_content_length_header, "Transfer-Encoding", &res_transfer_encoding_header, &res_crlfcrlf, &res_crlf)) {
+				NOTIFY_ERR(RES_HEADERS_IMPROPER);
+				goto serve__main__near_end;
+			}
 			++n_tried_find_headers;
 
 			// set `res_body_length`
@@ -296,49 +324,75 @@ void *serve(void *unused) {
 			}
 
 			// parse the `Connection` header and save the address of the CR at the end of it for `force_connection_close`
-			if (!r_arg(force_connection_close) && after_res_connection_header == NULL && res_connection_header != NULL) {
-				after_res_connection_header = res_connection_header;
-				skip_space_tab(&after_res_connection_header, res_after_read_data);
-				if (res_crlfcrlf - after_res_connection_header >= 5 /* strlen("close") */ &&
-					strncasecmp(after_res_connection_header, "close", 5 /* "length" of the previous argument */) == 0) {
+			if (!r_arg(force_connection_close) && res_after_connection_header == NULL && res_connection_header != NULL) {
+				res_after_connection_header = res_connection_header;
+				skip_space_tab(&res_after_connection_header, res_after_read_data);
+				if (res_crlfcrlf - res_after_connection_header >= 5 /* strlen("close") */ &&
+					strncasecmp(res_after_connection_header, "close", 5 /* "length" of the previous argument */) == 0) {
 					http_keep_alive = 0;
 				}
-				after_res_connection_header += 5 /* strlen("close") */;
-				skip_space_tab(&after_res_connection_header, res_after_read_data);
-				if (*after_res_connection_header != '\r') {
+				res_after_connection_header += 5 /* strlen("close") */;
+				skip_space_tab(&res_after_connection_header, res_after_read_data);
+				if (*res_after_connection_header != '\r') {
 					http_keep_alive = 1;
-					++after_res_connection_header;
+					++res_after_connection_header;
 				}
-				skip_to_crlf(&after_res_connection_header, res_after_read_data);
+				skip_to_crlf(&res_after_connection_header, res_after_read_data);
 			}
 
 			// check if some response headers didn't fit into `buf`
 			if (res_crlfcrlf == NULL) {
-				#if 0
 				if (n_tried_find_headers == 5) {
-				#endif
 					NOTIFY_ERR(RES_HEADERS_TOO_LONG);
 					goto serve__main__near_end;
-				#if 0
+				}
+				if (res_crlf == NULL) {
+					// yes, this means that very long headers will not get parsed
+					// that's not something that i care about
+					if (n_read_bytes < 1 ||
+						SSL_write(ssl, offset_buf, n_read_bytes) <= 0) {
+						goto serve__main__near_end;
+					}
+					offset_buf = buf + 1;
+					buf[0] = res_after_read_data[-1];
+					if ((n_read_bytes = read(service_socket, offset_buf, r_arg(buf_sz) - 1)) <= 0) {
+						goto serve__main__near_end;
+					}
+					res_after_read_data = offset_buf + n_read_bytes;
+				} else {
+					if (r_arg(force_connection_close) && res_connection_header != NULL && !sent_connection_close) {
+						if (SSL_write(ssl, offset_buf, res_connection_header /* strlen("\r\n") */ - offset_buf) < 0 ||
+							SSL_write(ssl, "Connection: close", 17 /* "length" of the previous argument */) < 0 ||
+							SSL_write(ssl, res_after_connection_header, res_after_read_data - res_after_connection_header) < 0) {
+							goto serve__main__near_end;
+						}
+						sent_connection_close = 1;
+					}
+					if (SSL_write(ssl, offset_buf, res_crlf + 2 /* strlen("\r\n") */ - offset_buf) <= 0) {
+						goto serve__main__near_end;
+					}
+					unsigned int unprocessed_byte_count = res_after_read_data - res_crlf - 2 /* strlen("\r\n") */;
+					memcpy(buf, res_crlf + 2 /* strlen("\r\n") */, unprocessed_byte_count);
+					offset_buf = buf + unprocessed_byte_count;
+					if ((n_read_bytes = read(service_socket, offset_buf, r_arg(buf_sz) - unprocessed_byte_count)) <= 0) {
+						goto serve__main__near_end;
+					}
+					res_after_read_data = offset_buf + n_read_bytes;
 				}
 				goto serve__prtcl_1__find_res_headers;
-				#endif
 			}
-
-			// earlier, a few bytes were read into `prtcl_id`
-			// here, they're sent to the client
-			if (SSL_write(ssl, prtcl_id, prtcl_id_len) < 0) {
-				goto serve__main__near_end;
-			}
-			prtcl_id_len = 0;
-
-			// if `force_connection_close`, this will send the headers up until the `Connection` header, the headers after the `Connection` header, and then a static `Connection: close` header
-			if (r_arg(force_connection_close)) {
-				if (SSL_write(ssl, buf, res_connection_header - 2 - buf) < 0 ||
-					SSL_write(ssl, after_res_connection_header, res_crlfcrlf - after_res_connection_header) < 0 ||
-					SSL_write(ssl, "\r\nConnection: close\r\n\r\n", 23 /* "length" of the previous argument */) < 0) {
+			if (r_arg(force_connection_close) && res_connection_header != NULL && !sent_connection_close) {
+				if (SSL_write(ssl, offset_buf, res_connection_header /* strlen("\r\n") */ - offset_buf) < 0 ||
+					SSL_write(ssl, "Connection: close", 17 /* "length" of the previous argument */) < 0 ||
+					SSL_write(ssl, res_after_connection_header, res_crlfcrlf + 4 /* strlen("\r\n\r\n") */ - res_after_connection_header) < 0) {
 					goto serve__main__near_end;
 				}
+				sent_connection_close = 1;
+			} else if (SSL_write(ssl, offset_buf, res_crlfcrlf + 4 /* strlen("\r\n\r\n") */ - offset_buf) < 0) {
+				goto serve__main__near_end;
+			}
+
+			if (sent_connection_close) {
 				http_keep_alive = 0;
 			}
 
@@ -346,11 +400,6 @@ void *serve(void *unused) {
 			if (res_body_length == CHUNKED_ENCODING) {
 				// set-up
 				char *chunk = res_crlfcrlf + 4 /* strlen("\r\n\r\n") */;
-				if (!r_arg(force_connection_close)) {
-					if (SSL_write(ssl, buf, chunk - buf) < 0) {
-						goto serve__main__near_end;
-					}
-				}
 				int chunk_size = 0;
 				int remaining_in_buf = res_after_read_data - chunk;
 				char res_crlfcrlf_c = 0;
@@ -386,10 +435,12 @@ void *serve(void *unused) {
 						} else {
 							digit -= '0'; // '0' -> 0
 						}
+
 						if (digit > 15) {
 							// invalid digit
 							goto serve__main__near_end;
 						}
+						
 						chunk_size *= 0x10;
 						chunk_size += digit;
 						++parsed_len_bytes;
@@ -420,11 +471,11 @@ void *serve(void *unused) {
 								x = *(chunk++);
 								--remaining_in_buf;
 							} else {
-								if ((read_bytes = read(service_socket, &x, 1)) != 1) {
+								if ((n_read_bytes = read(service_socket, &x, 1)) != 1) {
 									goto serve__main__near_end;
 								}
 							}
-							if (SSL_write(ssl, &x, read_bytes) <= 0) {
+							if (SSL_write(ssl, &x, n_read_bytes) <= 0) {
 								goto serve__main__near_end;
 							}
 
@@ -484,20 +535,14 @@ void *serve(void *unused) {
 				}
 			} else {
 				// handles `Content-Length` or no length
-				if (r_arg(force_connection_close)) {
-					if (SSL_write(ssl, res_crlfcrlf + 4 /* strlen("\r\n\r\n") */, res_after_read_data - res_crlfcrlf - 4 /* strlen("\r\n\r\n") */) < 0) {
-						goto serve__main__near_end;
-					}
-				} else {
-					if (SSL_write(ssl, buf, read_bytes) < 0) {
-						goto serve__main__near_end;
-					}
+				if (SSL_write(ssl, res_crlfcrlf + 4 /* strlen("\r\n\r\n") */, res_after_read_data - res_crlfcrlf - 4 /* strlen("\r\n\r\n") */) < 0) {
+					goto serve__main__near_end;
 				}
 
 				while (total_read_res_body_bytes < res_body_length) {
-					read_bytes = read(service_socket, buf, r_arg(buf_sz));
-					total_read_res_body_bytes += read_bytes;
-					if (read_bytes < 0 || SSL_write(ssl, buf, read_bytes) < 0) {
+					n_read_bytes = read(service_socket, buf, r_arg(buf_sz));
+					total_read_res_body_bytes += n_read_bytes;
+					if (n_read_bytes < 0 || SSL_write(ssl, buf, n_read_bytes) < 0) {
 						goto serve__main__near_end;
 					}
 				}
