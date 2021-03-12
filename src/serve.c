@@ -11,6 +11,14 @@
 #include "general.h"
 #include "utils.h"
 
+#if 1
+int _SSL_write(void *x, char *data, size_t len) {
+	for (size_t i = 0; i < len; ++i) putc(data[i], stdout);
+	return SSL_write(x, data, len);
+}
+#define SSL_write _SSL_write
+#endif
+
 void *serve(void *unused) {
 	char *h_buf = NULL, *buf = NULL; // signedness doesn't really matter for `h_buf` or `buf`
 	if (r_arg(use_stack_buf)) {
@@ -225,7 +233,6 @@ void *serve(void *unused) {
 	goto serve__main__near_end;
 
 	serve__prtcl_1: for (;;) {
-		puts("pending");
 		// check if there's any data to read
 		struct pollfd pollfds[] = {
 			{ .fd = cl_socket, .events = POLLIN | POLLRDHUP, .revents = 0, },
@@ -255,7 +262,7 @@ void *serve(void *unused) {
 			}
 
 			unsigned char http_keep_alive = 1;
-			unsigned long long int res_body_length = 0, total_read_res_body_bytes = 0;
+			unsigned long long int res_body_length = 0, res_total_read_body_bytes = 0;
 			unsigned char n_tried_find_headers = 0;
 			unsigned char sent_connection_close = 0;
 
@@ -301,8 +308,6 @@ void *serve(void *unused) {
 				if (res_content_length_header != NULL) {
 					// get value of `Content-Length` header as a uint64_t
 					res_content_length_header += 15 /* strlen("Content-Length:") */;
-					// `total_read_res_body_bytes` will be compared to `res_body_length`
-					total_read_res_body_bytes = res_after_read_data - res_crlfcrlf - 4 /* strlen("\r\n\r\n") */;
 					skip_space_tab(&res_content_length_header, res_after_read_data);
 					res_body_length = stoui(res_content_length_header, 8 /* octets */, '\r');
 					// `CHUNKED_ENCODING` is reserved for, well, chunked encoding
@@ -538,10 +543,11 @@ void *serve(void *unused) {
 				if (SSL_write(ssl, res_crlfcrlf + 4 /* strlen("\r\n\r\n") */, res_after_read_data - res_crlfcrlf - 4 /* strlen("\r\n\r\n") */) < 0) {
 					goto serve__main__near_end;
 				}
+				res_total_read_body_bytes += res_after_read_data - res_crlfcrlf - 4 /* strlen("\r\n\r\n") */;
 
-				while (total_read_res_body_bytes < res_body_length) {
+				while (res_total_read_body_bytes < res_body_length) {
 					n_read_bytes = read(service_socket, buf, r_arg(buf_sz));
-					total_read_res_body_bytes += n_read_bytes;
+					res_total_read_body_bytes += n_read_bytes;
 					if (n_read_bytes < 0 || SSL_write(ssl, buf, n_read_bytes) < 0) {
 						goto serve__main__near_end;
 					}
