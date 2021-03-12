@@ -393,7 +393,6 @@ void *serve(void *unused) {
 				goto serve__prtcl_1__find_res_headers;
 			}
 			if (r_arg(force_connection_close) && res_connection_header != NULL && !sent_connection_close) {
-				printf("%p\n", res_after_connection_header);
 				if (SSL_write(ssl, offset_buf, res_connection_header - offset_buf) < 0 ||
 					SSL_write(ssl, "Connection: close", 17 /* "length" of the previous argument */) < 0 ||
 					SSL_write(ssl, res_after_connection_header, res_crlfcrlf + 4 /* strlen("\r\n\r\n") */ - res_after_connection_header) < 0) {

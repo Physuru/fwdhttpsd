@@ -82,7 +82,7 @@ int parse_args(char *argv[], char *env[]) {
 			r_arg(use_stack_buf) = 1;
 			i += 1;
 		} else if (strcmp(argv[i], "-h") == 0) {
-			printf("-c : path to certificate file\n-k : path to private key\n-s : optionally a service name (http request host header value), and a tcp port number (e.g. -s localhost 1234)\n-u : uid to run server with\n-g : gid to run server with\n-t : the amount of threads to be serving (default is %u)\n-w : timeout in ms (default is %u)\n-b : main buffer size (default is %u)\n-f : force `Connection: close` header in http v1.1 responses\n-r : the amount of times to retry finding headers\n-a : use alloca instead of malloc for `buf` (UNSAFE)\n-h : display this text\n", THREAD_COUNT_DEFAULT, TIMEOUT_DEFAULT, BUF_SZ_DEFAULT);
+			printf("-c : path to certificate file\n-k : path to private key\n-s : optionally a service name (http request host header value), and a tcp port number (e.g. -s localhost 1234)\n-u : uid to run server with\n-g : gid to run server with\n-t : the amount of threads to be serving (default is %u)\n-w : timeout in ms (default is %u)\n-b : main buffer size (default is %u)\n-f : force `Connection: close` header in http v1.1 responses\n-4 : use ipv4 instead of ipv6\n-a : use alloca instead of malloc for `buf` (UNSAFE)\n-h : display this text\n", THREAD_COUNT_DEFAULT, TIMEOUT_DEFAULT, BUF_SZ_DEFAULT);
 			return 0;
 		} else {
 			fprintf(stderr, "unknown argument `%s`\n", argv[i]);
